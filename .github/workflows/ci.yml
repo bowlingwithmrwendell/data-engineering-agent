@@ -1,0 +1,71 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      live_agent_check:
+        description: "Also run a live Claude API smoke test (uses the ANTHROPIC_API_KEY secret)"
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: Engine and API tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: pip install -r requirements.txt -r requirements-dev.txt
+      # No secrets needed: the agent is tested with a scripted fake client.
+      - run: python -m pytest -q
+
+  docker:
+    name: Docker image builds
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: docker build -t data-engineering-agent .
+      - name: Container starts and reports healthy
+        run: |
+          docker run -d --name de -p 8000:8000 data-engineering-agent
+          for i in $(seq 1 30); do curl -sf localhost:8000/health && exit 0; sleep 2; done
+          docker logs de; exit 1
+
+  live-agent:
+    name: Live Claude smoke test (manual)
+    if: github.event_name == 'workflow_dispatch' && inputs.live_agent_check
+    needs: test
+    runs-on: ubuntu-latest
+    env:
+      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -r requirements.txt
+      - name: Ask the agent one plain-English request against the demo estate
+        run: |
+          python - <<'EOF'
+          from app.db import Base, SessionLocal, engine
+          from app.seed import seed
+          from app import agent
+          Base.metadata.create_all(engine)
+          with SessionLocal() as s:
+              seed(s)
+              r = agent.ask(s, "Average satisfaction score by support channel, on Fabric")
+          print(r["draft_answer"])
+          print("tools:", [t["tool"] for t in r["tools_used"]], "grounded:", r["grounded"])
+          assert "draft_pipeline" in [t["tool"] for t in r["tools_used"]], "agent didn't draft a spec"
+          assert r["status"] == "PENDING_REVIEW"
+          EOF

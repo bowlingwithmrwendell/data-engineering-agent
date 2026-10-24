@@ -1,0 +1,161 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AI Governance Scorecard · Data Engineering Agent</title>
+<style>
+  :root{
+    --navy:#152a45; --navy-2:#1e3a5f; --gold:#b8913a; --gold-2:#d4b46a;
+    --bg:#f5f6f8; --card:#fff; --text:#1c2733; --muted:#5b6878; --line:#e3e7ec;
+    --green:#1f8a4c; --amber:#c27c0e; --red:#c0392b;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;background:var(--bg);color:var(--text);line-height:1.5}
+  header{background:var(--navy);color:#fff;padding:20px 16px}
+  .wrap{max-width:1180px;margin:0 auto;padding:0 16px}
+  header .wrap{display:flex;align-items:center;gap:14px;flex-wrap:wrap}
+  .mark{width:44px;height:44px;border-radius:50%;background:var(--gold);color:var(--navy);display:grid;place-items:center;font-weight:800;flex:none}
+  header h1{font-size:1.25rem;margin:0} header p{margin:2px 0 0;color:#c9d3e0;font-size:.9rem}
+  header a{margin-left:auto;color:var(--gold-2);font-size:.88rem}
+  main.wrap{padding-top:24px;padding-bottom:48px}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:18px;margin-bottom:16px}
+  h2{font-size:1.05rem;margin:0 0 12px}
+  .stats{display:grid;gap:14px;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));margin-bottom:16px}
+  .stat{background:#fff;border:1px solid var(--line);border-radius:12px;padding:16px}
+  .stat .v{font-size:2rem;font-weight:750;font-variant-numeric:tabular-nums;color:var(--navy);line-height:1.1}
+  .stat .l{color:var(--muted);font-size:.85rem;margin-top:4px}
+  .stat.hero{border-color:var(--gold);background:#fbf7ee}
+  .bar{height:8px;background:#eef1f5;border-radius:99px;overflow:hidden;margin-top:10px}
+  .bar i{display:block;height:100%;background:var(--green)}
+  .two{display:grid;gap:16px;grid-template-columns:repeat(auto-fit,minmax(320px,1fr))}
+  dl{margin:0;display:grid;grid-template-columns:minmax(110px,30%) 1fr;gap:8px 14px;font-size:.9rem}
+  dt{color:var(--muted)} dd{margin:0}
+  ul{margin:4px 0 0;padding-left:18px}
+  .table-wrap{overflow-x:auto}
+  table{border-collapse:collapse;width:100%;font-size:.86rem}
+  th,td{text-align:left;padding:7px 10px;border-bottom:1px solid var(--line);vertical-align:top}
+  th{background:#f0f2f5;font-weight:650;white-space:nowrap}
+  .num{font-variant-numeric:tabular-nums;text-align:right}
+  .pill{display:inline-block;font-size:.74rem;font-weight:700;padding:2px 9px;border-radius:999px;color:#fff;background:var(--muted)}
+  .ok{background:var(--green)} .warn{background:var(--amber)} .bad{background:var(--red)}
+  .ks{display:flex;align-items:center;gap:12px;flex-wrap:wrap}
+  .ks .big{font-size:1.2rem;font-weight:750}
+  .muted{color:var(--muted);font-size:.86rem}
+  input{font:inherit;padding:8px 10px;border:1px solid var(--line);border-radius:8px;max-width:100%}
+  .btn{background:var(--navy);color:#fff;border:0;border-radius:8px;padding:8px 14px;font:inherit;cursor:pointer}
+  .btn.red{background:var(--red)}
+  .row{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-top:10px}
+  footer{text-align:center;color:var(--muted);font-size:.82rem;padding:20px 16px}
+  footer a{color:var(--navy)}
+</style>
+</head>
+<body>
+<header><div class="wrap">
+  <div class="mark">WK</div>
+  <div><h1>AI Governance Scorecard</h1><p>Data Engineering Agent · live controls and evidence · refreshes every 15 s</p></div>
+  <a href="/">← Back to the console</a>
+</div></header>
+
+<main class="wrap">
+  <div class="stats" id="stats"></div>
+  <div class="card" id="killswitch"><h2>Kill switch</h2><div class="muted">Loading…</div></div>
+  <div class="two">
+    <div class="card" id="modelcard"><h2>Model card</h2></div>
+    <div class="card" id="datapolicy"><h2>Data policy</h2></div>
+  </div>
+  <div class="card" id="limits"><h2>Limits</h2></div>
+  <div class="card" id="calls"><h2>AI call log (latest 20)</h2></div>
+</main>
+<footer>A build by <a href="https://agilebykillette.com">Agile by Killette</a> · <a href="/api/governance">Raw JSON</a> · <a href="/docs">API docs</a></footer>
+
+<script>
+const $ = s => document.querySelector(s);
+const esc = v => String(v ?? "—").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+const pct = v => v == null ? "—" : `${v}%`;
+const fmt = n => Number(n || 0).toLocaleString("en-US");
+const list = a => `<ul>${a.map(x => `<li>${esc(x)}</li>`).join("")}</ul>`;
+const outcomeClass = o => o === "OK" ? "ok" : (o === "ERROR" || o === "KILL_SWITCH") ? "bad" : "warn";
+
+async function load(){
+  const [g, calls] = await Promise.all([fetch("/api/governance").then(r=>r.json()), fetch("/api/ai-calls?limit=20").then(r=>r.json())]);
+  const hv = g.human_validation, u = g.usage_today, L = g.limits, ks = g.kill_switch;
+
+  $("#stats").innerHTML = `
+    <div class="stat hero"><div class="v">${pct(hv.pct_human_validated)}</div>
+      <div class="l">of AI outputs human-validated (${hv.human_validated} of ${hv.total_ai_outputs})</div>
+      <div class="bar"><i style="width:${hv.pct_human_validated || 0}%"></i></div></div>
+    <div class="stat"><div class="v">${pct(hv.pct_published_human_validated ?? 100)}</div><div class="l">of published AI output approved by a named human</div></div>
+    <div class="stat"><div class="v">${hv.pending_review}</div><div class="l">awaiting human review</div></div>
+    <div class="stat"><div class="v">${hv.by_status.APPROVED} / ${hv.by_status.APPROVED_WITH_EDITS} / ${hv.by_status.REJECTED}</div><div class="l">approved / edited / rejected</div></div>
+    <div class="stat"><div class="v">${fmt((g.deployments.by_status||{}).EXECUTED||0)} / ${fmt((g.deployments.by_status||{}).REJECTED||0)}</div><div class="l">deployments approved / rejected by a named human</div></div>
+    <div class="stat"><div class="v">${fmt(u.calls_today_global)}</div><div class="l">AI calls today (cap ${fmt(L.daily_cap_global)})</div></div>
+    <div class="stat"><div class="v">${fmt(u.tokens_today_global)}</div><div class="l">tokens today (budget ${fmt(L.daily_token_budget)})</div></div>`;
+
+  const locked = ks.runtime_control.startsWith("locked");
+  $("#killswitch").innerHTML = `<h2>Kill switch</h2>
+    <div class="ks"><span class="pill ${ks.engaged ? "bad" : "ok"}">${ks.engaged ? "ENGAGED" : "OFF"}</span>
+      <span class="big">${ks.engaged ? "AI is switched off. Every model call is refused." : "AI is available, within the limits below."}</span></div>
+    <p class="muted">Source: ${esc(ks.source)}${ks.actor ? ` · last changed by ${esc(ks.actor)} at ${esc((ks.since||"").replace("T"," ").slice(0,19))} UTC` : ""}${ks.reason ? ` · reason: ${esc(ks.reason)}` : ""}.
+      The builder, catalog and sandbox keep working either way. If the switch state can't be read, the AI is treated as off (fails closed).</p>
+    <p class="muted">Runtime control: ${esc(ks.runtime_control)}.</p>
+    ${locked ? "" : `<div class="row"><input id="tok" type="password" placeholder="Admin token" autocomplete="off">
+      <input id="actor" placeholder="Your name"><input id="reason" placeholder="Reason">
+      <button class="btn ${ks.engaged ? "" : "red"}" id="flip">${ks.engaged ? "Release" : "Engage kill switch"}</button><span id="ksMsg" class="muted"></span></div>`}`;
+  if(!locked) $("#flip").onclick = async () => {
+    const r = await fetch("/api/governance/kill-switch", {method:"POST", headers:{"Content-Type":"application/json","X-Admin-Token":$("#tok").value},
+      body: JSON.stringify({engaged: !ks.engaged, actor: $("#actor").value, reason: $("#reason").value})});
+    const j = await r.json().catch(()=>({}));
+    if(!r.ok){ $("#ksMsg").textContent = typeof j.detail === "string" ? j.detail : "Refused (check the name and reason)"; return; }
+    load();
+  };
+
+  const m = g.model_card;
+  $("#modelcard").innerHTML = `<h2>Model card</h2><dl>
+    <dt>Model</dt><dd><b>${esc(m.model)}</b> (${esc(m.provider)})</dd>
+    <dt>Role</dt><dd>${esc(m.role)}</dd>
+    <dt>Never used for</dt><dd>${list(m.not_used_for)}</dd>
+    <dt>Tools</dt><dd>${m.tools.map(t=>`<code>${esc(t)}</code>`).join(", ")}<div class="muted">${esc(m.tool_permissions)}</div></dd>
+    <dt>Safeguards</dt><dd>${list(m.safeguards)}</dd>
+    <dt>Known limits</dt><dd>${list(m.known_limits)}</dd></dl>`;
+
+  const d = g.data_policy;
+  $("#datapolicy").innerHTML = `<h2>Data policy</h2><dl>
+    <dt>Data</dt><dd>${esc(d.data)}</dd><dt>Sent to the model</dt><dd>${esc(d.sent_to_model)}</dd>
+    <dt>Visitor identity</dt><dd>${esc(d.visitor_identity)}</dd><dt>Retention</dt><dd>${esc(d.retention)}</dd>
+    <dt>Secrets</dt><dd>${esc(d.secrets)}</dd>
+    <dt>Deployment gate</dt><dd>Only the exact spec version that passed the sandbox can be requested. A named human, other than the requester and never the AI, approves it; the sandbox re-runs at approval and nothing deploys if it fails.</dd>
+    <dt>Review gate</dt><dd>Every AI output starts PENDING_REVIEW. A named human approves, edits then approves, or rejects it with a reason. The AI cannot approve its own work.${g.review_gate.reviewer_token_required ? " Reviewers must present a reviewer token." : ""}</dd></dl>`;
+
+  const rows = [
+    ["AI requests per visitor per minute", L.rate_limit_per_minute_per_visitor, u.calls_last_minute_visitor, "you, last 60 s"],
+    ["AI requests per visitor per day", L.daily_cap_per_visitor, u.calls_today_visitor, "you, today"],
+    ["AI requests per day (all visitors)", L.daily_cap_global, u.calls_today_global, "today"],
+    ["Tokens per day (all visitors)", L.daily_token_budget, u.tokens_today_global, "today"],
+    ["max_tokens per model call", L.max_tokens_per_call, null, ""],
+    ["Sandbox time limit per test (seconds)", L.sandbox_timeout_seconds, null, ""],
+    ["Tool round trips per question", L.max_agent_turns, null, ""],
+    ["Request body size (bytes)", L.max_request_bytes, null, ""],
+    ["Question length (characters)", L.max_question_chars, null, ""],
+  ];
+  $("#limits").innerHTML = `<h2>Limits</h2><p class="muted">Configured in <code>.env</code>. ${esc(L.reset)}. Calls over a limit are refused before reaching the model and logged.</p>
+    <div class="table-wrap"><table><thead><tr><th>Limit</th><th class="num">Setting</th><th class="num">Used</th><th></th></tr></thead><tbody>
+    ${rows.map(r=>`<tr><td>${esc(r[0])}</td><td class="num"><b>${fmt(r[1])}</b></td><td class="num">${r[2]==null?"":fmt(r[2])}</td><td class="muted">${esc(r[3])}</td></tr>`).join("")}
+    </tbody></table></div>`;
+
+  $("#calls").innerHTML = `<h2>AI call log (latest 20)</h2><p class="muted">Every model call attempt, including refusals: who (hashed visitor), when, model, tools, tokens and outcome.</p>
+    <div class="table-wrap"><table><thead><tr><th>When (UTC)</th><th>Who</th><th>Kind</th><th>Model</th><th>Tools</th><th class="num">Tokens in/out</th><th>Outcome</th><th>Review</th></tr></thead><tbody>
+    ${calls.map(c=>`<tr><td>${esc(c.at.replace("T"," ").slice(0,19))}</td><td><code>${esc(c.visitor)}</code>${c.requested_by?`<div class="muted">${esc(c.requested_by)}</div>`:""}</td>
+      <td>${esc(c.kind)}</td><td>${esc(c.model)}</td><td>${esc(c.tools.join(", ") || "—")}</td>
+      <td class="num">${fmt(c.input_tokens)} / ${fmt(c.output_tokens)}</td><td><span class="pill ${outcomeClass(c.outcome)}">${esc(c.outcome)}</span></td>
+      <td>${c.review_id ? "#"+esc(c.review_id) : "—"}</td></tr>`).join("") || `<tr><td colspan="8" class="muted">No AI calls yet.</td></tr>`}
+    </tbody></table></div>`;
+}
+load(); setInterval(() => {
+  // Don't redraw while someone is typing into the kill-switch form.
+  const typing = [...document.querySelectorAll("#killswitch input")].some(i => i.value || i === document.activeElement);
+  if(!document.hidden && !typing) load().catch(()=>{});
+}, 15000);
+</script>
+</body>
+</html>

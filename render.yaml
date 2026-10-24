@@ -1,0 +1,42 @@
+# Render Blueprint: one free Docker web service.
+#
+# The public sandbox deliberately uses the built-in SQLite database inside the
+# container: every time the free instance wakes, the fictional demo data estate
+# is reseeded fresh, so visitors' edits never accumulate. (Render's free
+# PostgreSQL expires after 30 days, which would break the sandbox.)
+# For a persistent deployment, add a Render PostgreSQL database and set
+# DATABASE_URL to its connection string -- no code changes needed.
+services:
+  - type: web
+    name: data-engineering-agent
+    runtime: docker
+    plan: free
+    healthCheckPath: /health
+    envVars:
+      - key: ANTHROPIC_API_KEY
+        sync: false          # set it in the Render dashboard; never in this file
+      - key: ANTHROPIC_MODEL
+        value: claude-sonnet-5-5
+      - key: DATABASE_URL
+        value: sqlite:////tmp/de_agent.db
+      # --- AI governance (see .env.example for every setting) ---
+      - key: TRUSTED_PROXY_HOPS
+        value: "1"            # Render sits in front of the app: use its X-Forwarded-For entry
+      - key: VISITOR_SALT
+        generateValue: true
+      - key: AI_ENABLED
+        value: "true"
+      - key: RATE_LIMIT_PER_MINUTE
+        value: "5"
+      - key: DAILY_CAP_PER_VISITOR
+        value: "25"
+      - key: DAILY_CAP_GLOBAL
+        value: "200"
+      - key: DAILY_TOKEN_BUDGET
+        value: "400000"
+      - key: MAX_TOKENS
+        value: "1500"
+      - key: ADMIN_TOKEN
+        sync: false          # set in the dashboard to enable the runtime kill switch
+      - key: REVIEWER_TOKEN
+        sync: false          # optional

@@ -1,0 +1,832 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Data Engineering Agent · Agile by Killette</title>
+<style>
+  :root{
+    --navy:#152a45; --navy-2:#1e3a5f; --gold:#b8913a; --gold-2:#d4b46a;
+    --bg:#f5f6f8; --card:#fff; --text:#1c2733; --muted:#5b6878; --line:#e3e7ec;
+    --green:#1f8a4c; --amber:#c27c0e; --red:#c0392b;
+    --green-bg:#edf7f1; --amber-bg:#fdf5e8; --red-bg:#fbefed; --gold-bg:#fbf7ee;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;background:var(--bg);color:var(--text);line-height:1.5}
+  header{background:var(--navy);color:#fff;padding:18px 16px}
+  .wrap{max-width:1180px;margin:0 auto;padding:0 16px}
+  header .wrap{display:flex;align-items:center;gap:14px;flex-wrap:wrap}
+  .mark{width:44px;height:44px;border-radius:50%;background:var(--gold);color:var(--navy);display:grid;place-items:center;font-weight:800;letter-spacing:.5px;flex:none}
+  header h1{font-size:1.25rem;margin:0}
+  header p{margin:2px 0 0;color:#c9d3e0;font-size:.9rem}
+  .hdr-right{margin-left:auto;display:flex;align-items:center;gap:12px;flex-wrap:wrap}
+  .badge{font-size:.78rem;border:1px solid var(--gold);color:var(--gold-2);padding:4px 10px;border-radius:999px}
+  .switch{display:flex;align-items:center;gap:8px;font-size:.86rem;color:#dfe6ef;cursor:pointer;user-select:none}
+  .switch input{position:absolute;opacity:0;width:1px;height:1px}
+  .switch .track{width:38px;height:22px;border-radius:999px;background:#3b5577;position:relative;transition:background .15s}
+  .switch .track::after{content:"";position:absolute;top:3px;left:3px;width:16px;height:16px;border-radius:50%;background:#fff;transition:left .15s}
+  .switch input:checked + .track{background:var(--gold)}
+  .switch input:checked + .track::after{left:19px}
+  .switch input:focus-visible + .track{outline:2px solid var(--gold-2);outline-offset:2px}
+  nav{background:var(--navy-2);overflow-x:auto}
+  nav .wrap{display:flex;gap:2px}
+  nav button{background:none;border:0;color:#c9d3e0;padding:12px 14px;font:inherit;font-size:.92rem;cursor:pointer;border-bottom:3px solid transparent;white-space:nowrap}
+  nav button.active{color:#fff;border-bottom-color:var(--gold)}
+  nav a{margin-left:auto;color:var(--gold-2);padding:12px 14px;white-space:nowrap;font-size:.92rem;text-decoration:none}
+  main.wrap{padding-top:24px;padding-bottom:48px}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:18px;margin-bottom:16px}
+  h2{font-size:1.12rem;margin:0 0 10px}
+  h3{font-size:.98rem;margin:16px 0 8px}
+  .lead{font-size:1.05rem;color:var(--muted);margin:0}
+  .grid{display:grid;gap:14px;grid-template-columns:repeat(auto-fit,minmax(250px,1fr))}
+  .tile{border:1px solid var(--line);border-radius:12px;padding:16px;background:#fff;cursor:pointer;text-align:left;font:inherit;color:inherit;width:100%}
+  .tile:hover,.tile:focus-visible{border-color:var(--gold);outline:none;box-shadow:0 0 0 3px var(--gold-bg)}
+  .tile .name{font-weight:650}
+  .tile .big{font-size:1.6rem;line-height:1}
+  .muted{color:var(--muted);font-size:.88rem}
+  .pill{display:inline-block;font-size:.74rem;padding:2px 8px;border-radius:6px;background:#eef1f5;color:var(--muted);margin:2px 4px 2px 0;white-space:nowrap}
+  .pill.PII{background:var(--red-bg);color:var(--red);font-weight:650}
+  .pill.Confidential{background:var(--amber-bg);color:var(--amber)}
+  .pill.Certified,.pill.PII-masked{background:var(--green-bg);color:var(--green)}
+  .pill.platpill{background:#e8eef7;color:var(--navy-2)}
+  .status{display:inline-block;font-size:.74rem;font-weight:700;padding:3px 9px;border-radius:999px;color:#fff;letter-spacing:.3px;white-space:nowrap}
+  .s-DRAFT{background:#7b8796}.s-VALIDATED{background:var(--green)}.s-FAILED_VALIDATION{background:var(--red)}
+  .s-PENDING_APPROVAL{background:var(--amber)}.s-DEPLOYED{background:var(--navy)}.s-REJECTED{background:var(--red)}
+  .table-wrap{overflow-x:auto}
+  table{border-collapse:collapse;width:100%;font-size:.86rem}
+  th,td{text-align:left;padding:7px 10px;border-bottom:1px solid var(--line);vertical-align:top}
+  th{background:#f0f2f5;font-weight:650;white-space:nowrap}
+  td.num{text-align:right;font-variant-numeric:tabular-nums}
+  select,input[type=text],input[type=number],input[type=date],textarea{font:inherit;font-size:.92rem;padding:8px 10px;border:1px solid #cfd6df;border-radius:8px;background:#fff;color:var(--text);max-width:100%}
+  select:focus,input:focus,textarea:focus{outline:2px solid var(--gold-2);outline-offset:1px}
+  textarea{width:100%;min-height:84px}
+  label.f{display:block;font-size:.84rem;font-weight:600;color:var(--muted);margin:10px 0 4px}
+  .btn{background:var(--navy);color:#fff;border:0;border-radius:8px;padding:9px 16px;font:inherit;font-size:.92rem;cursor:pointer;white-space:nowrap}
+  .btn:hover{background:var(--navy-2)}
+  .btn.gold{background:var(--gold);color:var(--navy);font-weight:650}
+  .btn.gold:hover{background:var(--gold-2)}
+  .btn.ghost{background:#fff;color:var(--navy);border:1px solid #b9c3cf}
+  .btn.ghost:hover{border-color:var(--navy)}
+  .btn.small{padding:5px 10px;font-size:.82rem}
+  .btn.link{background:none;color:var(--navy-2);padding:2px 4px;text-decoration:underline}
+  .btn:disabled{opacity:.5;cursor:not-allowed}
+  .row{display:flex;gap:10px;flex-wrap:wrap;align-items:center}
+  .hidden{display:none !important}
+  .devonly{display:none !important}
+  body.dev .devonly{display:block !important}
+  body.dev span.devonly,body.dev button.devonly{display:inline-block !important}
+  body.dev .nondev{display:none !important}
+  footer{text-align:center;color:var(--muted);font-size:.82rem;padding:20px 16px}
+  footer a{color:var(--navy)}
+
+  /* builder */
+  .builder{display:grid;gap:16px;grid-template-columns:minmax(0,1fr) 340px;align-items:start}
+  @media (max-width: 960px){ .builder{grid-template-columns:minmax(0,1fr)} .side{position:static !important} }
+  .side{position:sticky;top:12px}
+  .step{border:1px solid var(--line);border-radius:12px;background:#fff;padding:16px 18px;margin-bottom:12px}
+  .step h3{margin:0 0 4px;display:flex;align-items:center;gap:10px;font-size:1rem}
+  .step h3 .n{width:26px;height:26px;border-radius:50%;background:var(--navy);color:#fff;display:grid;place-items:center;font-size:.8rem;flex:none}
+  .step .help{color:var(--muted);font-size:.86rem;margin:0 0 10px 36px}
+  .step .body{margin-left:36px}
+  @media (max-width: 600px){ .step .help,.step .body{margin-left:0} }
+  .line{display:flex;gap:8px;flex-wrap:wrap;align-items:center;padding:8px 10px;border:1px solid var(--line);border-radius:10px;margin-bottom:8px;background:#fbfcfd}
+  .line .word{color:var(--muted);font-size:.88rem}
+  .line select,.line input{min-width:0;max-width:100%}
+  pre.code{max-width:100%}
+  .x{background:none;border:0;color:var(--muted);font-size:1.1rem;cursor:pointer;margin-left:auto;padding:0 6px;line-height:1}
+  .x:hover{color:var(--red)}
+  .seg{display:inline-flex;border:1px solid #cfd6df;border-radius:10px;overflow:hidden}
+  .seg button{background:#fff;border:0;padding:8px 14px;font:inherit;font-size:.9rem;cursor:pointer;color:var(--muted)}
+  .seg button.on{background:var(--navy);color:#fff}
+  .plats{display:grid;gap:10px;grid-template-columns:repeat(auto-fit,minmax(150px,1fr))}
+  .plat{border:2px solid var(--line);border-radius:10px;padding:10px 12px;cursor:pointer;background:#fff;text-align:left;font:inherit;color:inherit}
+  .plat.on{border-color:var(--gold);background:var(--gold-bg)}
+  .plat b{display:block}
+  .checks label{display:flex;gap:8px;align-items:center;padding:3px 0;font-size:.9rem}
+  .summary{font-size:1rem;background:var(--gold-bg);border-left:4px solid var(--gold);padding:12px 14px;border-radius:6px}
+  .issue{font-size:.86rem;padding:8px 10px;border-radius:8px;margin-top:8px}
+  .issue.error{background:var(--red-bg)} .issue.warning{background:var(--amber-bg)}
+
+  /* results */
+  .banner{border-radius:12px;padding:14px 16px;display:flex;gap:12px;align-items:center;flex-wrap:wrap}
+  .banner .ico{font-size:1.5rem}
+  .banner b{font-size:1.05rem}
+  .banner.PASSED{background:var(--green-bg);border:1px solid #bfe3cd}
+  .banner.PASSED_WITH_WARNINGS{background:var(--amber-bg);border:1px solid #f1d6a6}
+  .banner.FAILED{background:var(--red-bg);border:1px solid #efc2bc}
+  .flow{display:flex;gap:6px;flex-wrap:wrap;margin:12px 0 4px;padding:0;list-style:none}
+  .flow li{font-size:.8rem;padding:5px 10px;border-radius:999px;background:#eef1f5;color:var(--muted)}
+  .flow li.done{background:var(--green-bg);color:var(--green)}
+  .flow li.current{background:var(--navy);color:#fff}
+  .flow li.failed{background:var(--red-bg);color:var(--red)}
+  .chk{border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-top:8px;background:#fff}
+  .chk.FAIL{border-left:4px solid var(--red)} .chk.WARN{border-left:4px solid var(--amber)} .chk.PASS{border-left:4px solid var(--green)}
+  .chk .t{font-weight:650}
+  .chk .fix{margin-top:6px;font-size:.88rem}
+  details.how{margin-top:6px;font-size:.82rem;color:var(--muted)}
+  details.how pre{white-space:pre-wrap;background:#f6f7f9;padding:8px;border-radius:6px;margin:6px 0 0}
+  .code-tabs{display:flex;gap:4px;flex-wrap:wrap;margin-bottom:8px}
+  .code-tabs button{background:#eef1f5;border:0;border-radius:6px;padding:6px 10px;font:inherit;font-size:.8rem;cursor:pointer;color:var(--muted)}
+  .code-tabs button.on{background:var(--navy);color:#fff}
+  pre.code{background:#0f1c2e;color:#e6edf6;padding:14px;border-radius:10px;overflow:auto;font-size:.8rem;line-height:1.45;max-height:460px;margin:0}
+  .answer{background:#fffaf0;border:2px dashed var(--amber);border-radius:10px;padding:14px 16px}
+  .answer table{margin:8px 0}
+  .answer p{margin:6px 0}
+  .note{font-size:.84rem;color:var(--muted);margin-top:8px}
+  .lineage{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+  .lineage .node{border:1px solid var(--line);border-radius:8px;padding:6px 10px;background:#fff;font-size:.86rem;cursor:pointer}
+  .lineage .node.me{border-color:var(--gold);background:var(--gold-bg);font-weight:650;cursor:default}
+  .layers{display:grid;gap:8px;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));margin-top:10px}
+  .layers div{border:1px solid var(--line);border-radius:10px;padding:10px 12px;font-size:.84rem;background:#fbfcfd}
+  .layers b{display:block;color:var(--navy);font-size:.88rem}
+  .toast{position:fixed;bottom:18px;left:50%;transform:translateX(-50%);background:var(--navy);color:#fff;padding:10px 16px;border-radius:10px;font-size:.9rem;box-shadow:0 6px 20px rgba(0,0,0,.2);z-index:9;max-width:90vw}
+  .rv{border:1px solid var(--line);border-radius:12px;padding:14px 16px;margin-bottom:12px;background:#fff}
+  .spinner{display:inline-block;width:14px;height:14px;border:2px solid #c9d3e0;border-top-color:var(--navy);border-radius:50%;animation:spin .8s linear infinite;vertical-align:-2px}
+  @keyframes spin{to{transform:rotate(360deg)}}
+</style>
+</head>
+<body>
+<header>
+  <div class="wrap">
+    <div class="mark" aria-hidden="true">WK</div>
+    <div>
+      <h1>Data Engineering Agent</h1>
+      <p>Lakeside Outfitters · Databricks · Snowflake · Microsoft Fabric</p>
+    </div>
+    <div class="hdr-right">
+      <label class="switch" title="Show generated code, the pipeline spec and how each check is measured">
+        <input type="checkbox" id="devToggle"><span class="track"></span> Developer view
+      </label>
+      <span class="badge">Fictional demo data</span>
+    </div>
+  </div>
+</header>
+<nav><div class="wrap" id="tabs" role="tablist">
+  <button data-tab="start" class="active">Start</button>
+  <button data-tab="ask">Ask in plain English</button>
+  <button data-tab="build">Build step by step</button>
+  <button data-tab="data">Find data</button>
+  <button data-tab="pipelines">My pipelines</button>
+  <button data-tab="approvals">Approvals <span id="pendingCount" class="pill" style="margin:0 0 0 4px">0</span></button>
+  <a href="/governance">Governance ↗</a>
+</div></nav>
+
+<main class="wrap">
+  <section id="start"></section>
+  <section id="ask" class="hidden"></section>
+  <section id="build" class="hidden"></section>
+  <section id="data" class="hidden"></section>
+  <section id="pipelines" class="hidden"></section>
+  <section id="approvals" class="hidden"></section>
+</main>
+<footer>
+  A build by <a href="https://agilebykillette.com">Agile by Killette</a> ·
+  Code is compiled from a reviewed spec, tested in a sandbox and deployed only with human approval. ·
+  <a href="/docs">API docs</a>
+</footer>
+
+<script>
+const $ = (s, el=document) => el.querySelector(s);
+const $$ = (s, el=document) => [...el.querySelectorAll(s)];
+const esc = v => String(v ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+const words = s => String(s ?? "").replace(/_/g, " ");
+const slug = s => { let t = String(s||"").toLowerCase().replace(/[^a-z0-9]+/g,"_").replace(/^_+|_+$/g,""); if(!/^[a-z]/.test(t)) t = "t_" + t; return t.slice(0,63); };
+async function api(path, opts={}){
+  if(opts.json !== undefined){ opts = {...opts, method: opts.method || "POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify(opts.json, (k,v)=> k.startsWith("__") ? undefined : v)}; }
+  const r = await fetch(path, opts); const t = await r.text(); let j; try{ j = JSON.parse(t) }catch{ j = t }
+  if(!r.ok){ const e = new Error((j && j.detail) ? (typeof j.detail === "string" ? j.detail : JSON.stringify(j.detail)) : r.statusText); e.status = r.status; throw e; }
+  return j;
+}
+function toast(msg){ const d = document.createElement("div"); d.className = "toast"; d.setAttribute("role","status"); d.textContent = msg; document.body.appendChild(d); setTimeout(()=>d.remove(), 3200); }
+function store(k, v){ try{ if(v === undefined) return localStorage.getItem(k); localStorage.setItem(k, v); }catch{ return null; } }
+function table(cols, rows){ return `<div class="table-wrap"><table><thead><tr>${cols.map(c=>`<th>${esc(c[0])}</th>`).join("")}</tr></thead><tbody>${
+  rows.map(r=>`<tr>${cols.map(c=>`<td${c[2]?` class="${c[2]}"`:""}>${c[1](r)}</td>`).join("")}</tr>`).join("") || `<tr><td colspan="${cols.length}" class="muted">Nothing yet</td></tr>`}</tbody></table></div>`; }
+function rowsTable(rows){
+  if(!rows || !rows.length) return `<p class="muted">No rows.</p>`;
+  const keys = Object.keys(rows[0]);
+  return table(keys.map(k => [words(k), r => r[k] === null ? `<span class="muted">blank</span>` : esc(fmt(r[k])), typeof rows[0][k] === "number" ? "num" : ""]), rows);
+}
+const fmt = v => typeof v === "number" ? (Number.isInteger(v) ? v.toLocaleString("en-US") : v.toLocaleString("en-US",{maximumFractionDigits:2})) : v;
+const STATUS = {DRAFT:"Draft", VALIDATED:"Tested ✓", FAILED_VALIDATION:"Needs fixes", PENDING_APPROVAL:"Waiting for approval", DEPLOYED:"Live", REJECTED:"Rejected"};
+const status = s => `<span class="status s-${esc(s)}">${esc(STATUS[s] || s)}</span>`;
+const PLAT = {databricks:"Databricks", snowflake:"Snowflake", fabric:"Microsoft Fabric"};
+const tagPills = tags => (tags||[]).map(t => `<span class="pill ${esc(t)}">${esc(t)}</span>`).join("");
+
+/* tiny, safe Markdown renderer for agent answers (escape first, then format) */
+function md(src){
+  const lines = esc(src).split("\n"); let html = "", i = 0;
+  const inline = s => s.replace(/\*\*(.+?)\*\*/g,"<b>$1</b>").replace(/`([^`]+)`/g,"<code>$1</code>");
+  while(i < lines.length){
+    const l = lines[i];
+    if(/^\s*\|/.test(l)){
+      const rows = []; while(i < lines.length && /^\s*\|/.test(lines[i])) rows.push(lines[i++]);
+      const cells = r => r.trim().replace(/^\||\|$/g,"").split("|").map(c=>inline(c.trim()));
+      const body = rows.filter(r => !/^\s*\|[\s:|-]+\|\s*$/.test(r));
+      html += `<div class="table-wrap"><table><thead><tr>${cells(body[0]).map(c=>`<th>${c}</th>`).join("")}</tr></thead><tbody>${body.slice(1).map(r=>`<tr>${cells(r).map(c=>`<td>${c}</td>`).join("")}</tr>`).join("")}</tbody></table></div>`;
+      continue;
+    }
+    if(/^\s*([-*]|\d+\.)\s+/.test(l)){
+      const ordered = /^\s*\d+\./.test(l); const items = [];
+      while(i < lines.length && /^\s*([-*]|\d+\.)\s+/.test(lines[i])) items.push(lines[i++].replace(/^\s*([-*]|\d+\.)\s+/,""));
+      html += `<${ordered?"ol":"ul"}>${items.map(x=>`<li>${inline(x)}</li>`).join("")}</${ordered?"ol":"ul"}>`; continue;
+    }
+    const h = l.match(/^(#{1,4})\s+(.*)/);
+    if(h){ html += `<h3>${inline(h[2])}</h3>`; i++; continue; }
+    if(l.trim()) html += `<p>${inline(l)}</p>`;
+    i++;
+  }
+  return html;
+}
+
+/* ---------------- state ---------------- */
+let CAT = {};          // id -> dataset
+let EXAMPLES = [];
+let B = null;          // builder: {spec, mode, pipeline, targetTouched}
+const loaded = {};
+
+async function loadCatalog(){ const list = await api("/api/catalog"); CAT = Object.fromEntries(list.map(d => [d.id, d])); return list; }
+function colInfo(ref){ const [d, c] = ref.split("."); return (CAT[d]?.columns || []).find(x => x.name === c) || {}; }
+function colLabel(ref){ const [d, c] = String(ref).split("."); return `${CAT[d]?.friendly_name || d} › ${words(c)}`; }
+function scopeIds(spec){ return [spec.source, ...spec.joins.map(j => j.dataset)].filter(Boolean); }
+function scopeCols(spec, filter){ return scopeIds(spec).flatMap(d => (CAT[d]?.columns || []).filter(c => !filter || filter(c)).map(c => ({ref:`${d}.${c.name}`, ...c}))); }
+function opts(list, sel){ return list.map(o => `<option value="${esc(o.value)}"${String(o.value) === String(sel) ? " selected" : ""}>${esc(o.label)}</option>`).join(""); }
+
+/* ---------------- tabs & dev view ---------------- */
+$("#tabs").addEventListener("click", e => { const b = e.target.closest("button"); if(b) show(b.dataset.tab); });
+function show(tab){
+  $$("#tabs button").forEach(b => b.classList.toggle("active", b.dataset.tab === tab));
+  $$("main section").forEach(s => s.classList.toggle("hidden", s.id !== tab));
+  if(!loaded[tab] || ["pipelines","approvals"].includes(tab)){ loaded[tab] = true; loaders[tab](); }
+  window.scrollTo({top:0, behavior:"smooth"});
+}
+const dev = $("#devToggle");
+dev.checked = store("de-dev") === "1"; document.body.classList.toggle("dev", dev.checked);
+dev.onchange = () => { document.body.classList.toggle("dev", dev.checked); store("de-dev", dev.checked ? "1" : "0"); if(B) renderSide(); };
+const myName = () => store("de-name") || "";
+
+/* ---------------- Start ---------------- */
+const loaders = {
+  async start(){
+    EXAMPLES = await api("/api/examples");
+    $("#start").innerHTML = `
+      <div class="card">
+        <h2 style="font-size:1.35rem">Get trustworthy data tables without writing code.</h2>
+        <p class="lead">Describe what you need. The agent finds the right data, writes the code for Databricks,
+        Snowflake or Microsoft Fabric, tests it on sample data, and tells you in plain English what it found.
+        A person approves every deployment.</p>
+      </div>
+      <div class="grid">
+        <button class="tile" data-go="ask"><div class="big">💬</div><h3>Ask in plain English</h3>
+          <div class="muted">“Show completed revenue by region for each month.” The AI drafts it and tests it for you.</div></button>
+        <button class="tile" data-go="build"><div class="big">🧩</div><h3>Build it step by step</h3>
+          <div class="muted">Pick your data, choose what to total, and see the result. No AI needed.</div></button>
+        <button class="tile" data-go="data"><div class="big">🔎</div><h3>Find data</h3>
+          <div class="muted">Browse what exists, who owns it, how fresh it is, and where it came from.</div></button>
+      </div>
+      <div class="card" style="margin-top:16px">
+        <h2>Try an example</h2>
+        <p class="muted" style="margin-top:0">Each one opens in the builder. Test it and see what the sandbox finds: some of these have real-world problems hidden in the data.</p>
+        <div class="grid">${EXAMPLES.map(x => `
+          <button class="tile" data-ex="${esc(x.id)}"><div class="name">${esc(x.title)}</div>
+            <div class="muted">“${esc(x.ask)}”</div>
+            <div style="margin-top:6px"><span class="pill platpill">${esc(PLAT[x.spec.platform])}</span></div></button>`).join("")}</div>
+      </div>
+      <div class="card">
+        <h2>How it works</h2>
+        <div class="layers">
+          <div><b>1 · Interaction</b>Chat, guided builder, REST API.</div>
+          <div><b>2 · Orchestration</b>Turns intent into a spec and moves it through test → approve → deploy.</div>
+          <div><b>3 · Tool calling</b>Connectors for Databricks, Snowflake and Fabric, plus Git and schedules.</div>
+          <div><b>4 · Code sandbox</b>Runs the code in isolation and checks quality and compliance.</div>
+          <div><b>5 · Information</b>Catalog, lineage, run history and governance tags.</div>
+        </div>
+        <p class="note">The AI never writes code freehand: it fills in a typed spec, and a deterministic compiler generates the SQL, PySpark and dbt from it.</p>
+      </div>`;
+    $$("#start [data-go]").forEach(b => b.onclick = () => show(b.dataset.go));
+    $$("#start [data-ex]").forEach(b => b.onclick = () => { const x = EXAMPLES.find(e => e.id === b.dataset.ex); openBuilder(structuredClone(x.spec)); });
+  },
+
+  /* ---------------- Ask ---------------- */
+  async ask(){
+    if(!EXAMPLES.length) EXAMPLES = await api("/api/examples");
+    $("#ask").innerHTML = `
+      <div class="card">
+        <h2>What data do you need?</h2>
+        <p class="muted" style="margin-top:0">Say it the way you would to a colleague. Mention the platform if you have a preference.</p>
+        <label class="f" for="q">Your request</label>
+        <textarea id="q" maxlength="1000" placeholder="e.g. Average satisfaction score by support channel, refreshed daily on Fabric"></textarea>
+        <div class="row" style="margin-top:8px">
+          <input type="text" id="askName" placeholder="Your name (optional)" value="${esc(myName())}" style="max-width:220px" aria-label="Your name">
+          <button class="btn gold" id="askBtn">Ask the agent</button>
+        </div>
+        <div style="margin-top:10px" class="muted">Try:
+          ${EXAMPLES.map(x => `<button class="btn link" data-q="${esc(x.ask)}">${esc(x.title)}</button>`).join(" · ")}</div>
+      </div>
+      <div id="askOut"></div>`;
+    $$("#ask [data-q]").forEach(b => b.onclick = () => { $("#q").value = b.dataset.q; $("#q").focus(); });
+    $("#askBtn").onclick = askAgent;
+  },
+
+  async build(){ await loadCatalog(); if(!B) openBuilder(null, true); },
+
+  /* ---------------- Find data ---------------- */
+  async data(){
+    await loadCatalog();
+    $("#data").innerHTML = `
+      <div class="card">
+        <h2>Find data</h2>
+        <div class="row"><input type="text" id="dq" placeholder="Search in business words: revenue, customers, satisfaction…" style="flex:1;min-width:220px" aria-label="Search the catalog">
+        <button class="btn" id="dqBtn">Search</button></div>
+      </div>
+      <div id="dsList" class="grid"></div>
+      <div id="dsDetail" style="margin-top:16px"></div>`;
+    const run = async () => { const q = $("#dq").value.trim(); drawDatasets(q ? await api("/api/catalog?q=" + encodeURIComponent(q)) : Object.values(CAT)); };
+    $("#dqBtn").onclick = run; $("#dq").onkeydown = e => { if(e.key === "Enter") run(); };
+    drawDatasets(Object.values(CAT));
+  },
+
+  /* ---------------- Pipelines ---------------- */
+  async pipelines(){
+    const list = await api("/api/pipelines");
+    $("#pipelines").innerHTML = `<div class="card"><div class="row" style="justify-content:space-between"><h2 style="margin:0">My pipelines</h2>
+      <button class="btn gold" id="newPl">New pipeline</button></div>
+      <p class="muted">Every pipeline you or the agent created. Open one to test it, fix it or request deployment.</p>
+      ${table([
+        ["#", p => esc(p.id)],
+        ["Name", p => `<b>${esc(p.name)}</b><div class="muted">${esc(p.target)}</div>`],
+        ["Platform", p => esc(p.platform_name)],
+        ["Status", p => status(p.status)],
+        ["Last test", p => !p.last_test ? `<span class="muted">not tested</span>` : esc({PASSED:"Passed",PASSED_WITH_WARNINGS:"Passed with warnings",FAILED:"Failed"}[p.last_test.status]) + (p.last_test.current ? "" : ` <span class="muted">(older version)</span>`)],
+        ["", p => `<button class="btn small ghost" data-open="${p.id}">Open</button>`],
+      ], list)}</div>`;
+    $("#newPl").onclick = () => openBuilder(null);
+    $$("#pipelines [data-open]").forEach(b => b.onclick = () => openPipeline(+b.dataset.open));
+  },
+
+  async approvals(){ await drawApprovals(); },
+};
+
+/* ---------------- Ask: agent ---------------- */
+async function askAgent(){
+  const q = $("#q").value.trim(); if(q.length < 3) return toast("Describe what you need first.");
+  const name = $("#askName").value.trim(); if(name) store("de-name", name);
+  const out = $("#askOut"); $("#askBtn").disabled = true;
+  out.innerHTML = `<div class="card"><span class="spinner"></span> Finding data, drafting a pipeline and testing it…</div>`;
+  try{
+    const r = await api("/api/agent/ask", {json:{question:q, requested_by:name}});
+    out.innerHTML = `<div class="card">
+      <div class="row" style="justify-content:space-between"><h2 style="margin:0">Draft answer</h2><span class="status s-PENDING_APPROVAL">Awaiting human review</span></div>
+      <div class="answer" style="margin-top:10px">${md(r.draft_answer)}</div>
+      ${r.pipeline_ids.length ? `<div class="row" style="margin-top:12px">${r.pipeline_ids.map(id => `<button class="btn gold" data-open="${id}">Open pipeline #${id}</button>`).join("")}</div>` : ""}
+      <div class="note">${r.grounded ? "✓ Every number in this answer came from a tool result." : `⚠ Unverified numbers: ${esc(r.unverified_numbers.join(", "))}. A reviewer must remove them.`}
+        This answer is a draft until a person approves it on the Approvals tab.</div>
+      <details class="how devonly"><summary>What the agent did (${r.tools_used.length} tool calls · ${r.usage.input_tokens + r.usage.output_tokens} tokens)</summary>
+        <pre>${esc(r.tools_used.map(t => `${t.error ? "✗" : "✓"} ${t.tool}(${JSON.stringify(t.input)})`).join("\n"))}</pre></details>
+    </div>`;
+    $$("#askOut [data-open]").forEach(b => b.onclick = () => openPipeline(+b.dataset.open));
+    refreshPending();
+  }catch(e){
+    out.innerHTML = e.status === 503
+      ? `<div class="card"><h2>Plain-English requests are off right now</h2><p>${esc(e.message)}</p>
+         <button class="btn gold" id="toBuild">Use the step-by-step builder</button></div>`
+      : `<div class="card"><h2>That didn't work</h2><p>${esc(e.message)}</p></div>`;
+    const tb = $("#toBuild"); if(tb) tb.onclick = () => show("build");
+  }finally{ $("#askBtn").disabled = false; }
+}
+
+/* ---------------- Find data ---------------- */
+function drawDatasets(list){
+  $("#dsList").innerHTML = list.map(d => `
+    <button class="tile" data-ds="${esc(d.id)}">
+      <div class="row" style="justify-content:space-between"><span class="name">${esc(d.friendly_name)}</span><span class="pill platpill">${esc(d.platform_name)}</span></div>
+      <div class="muted" style="margin:4px 0">${esc(d.description)}</div>
+      <div>${tagPills(d.tags)}<span class="pill">${esc(d.layer)}</span></div>
+      <div class="muted" style="margin-top:4px">${d.freshness_days > 1 ? `⚠ last loaded ${d.freshness_days} days ago` : "Up to date"} · ${esc(d.owner)}</div>
+      ${d.why && d.why.length ? `<div class="muted devonly">Matched: ${esc(d.why.join(", "))}</div>` : ""}
+    </button>`).join("") || `<p class="muted">No datasets match. Try another word.</p>`;
+  $$("#dsList [data-ds]").forEach(b => b.onclick = () => showDataset(b.dataset.ds));
+}
+async function showDataset(id){
+  const d = await api("/api/catalog/" + encodeURIComponent(id));
+  const direct = [...new Set(d.lineage.upstream.filter(e => e.to === d.id).map(e => e.from))];
+  const further = d.lineage.upstream.filter(e => e.to !== d.id);
+  const down = [...new Set(d.lineage.downstream.filter(e => e.from === d.id).map(e => e.to))];
+  const node = x => `<button class="node" data-ds="${esc(x)}">${esc(CAT[x]?.friendly_name || x)}</button>`;
+  $("#dsDetail").innerHTML = `<div class="card">
+    <div class="row" style="justify-content:space-between"><h2 style="margin:0">${esc(d.friendly_name)}</h2>
+      <button class="btn gold" id="useDs">Build with this data</button></div>
+    <p>${esc(d.description)}</p>
+    <div>${tagPills(d.tags)}<span class="pill platpill">${esc(d.platform_name)}</span><span class="pill">${esc(d.layer)}</span>
+      <span class="muted">Owner: ${esc(d.owner)} · ${d.row_count} sample rows · last loaded ${esc(d.last_loaded)}</span></div>
+    ${d.curated_version ? `<div class="issue warning">This is a raw table. For joins use <b>${esc(CAT[d.curated_version]?.friendly_name || d.curated_version)}</b>.</div>` : ""}
+    <h3>Where it comes from and where it goes</h3>
+    <div class="lineage">${direct.length ? direct.map(node).join(` <span class="muted">+</span> `) + " →" : `<span class="muted">source system</span> →`}
+      <span class="node me">${esc(d.friendly_name)}</span>${down.length ? " → " + down.map(node).join(" ") : ""}</div>
+    ${further.length ? `<p class="muted" style="margin:6px 0 0">Further upstream: ${further.map(e => `${esc(CAT[e.from]?.friendly_name || e.from)} → ${esc(CAT[e.to]?.friendly_name || e.to)}`).join(" · ")}</p>` : ""}
+    <details class="how devonly"><summary>Column-level lineage</summary><pre>${esc(d.lineage.upstream.filter(e => e.to === d.id).flatMap(e => e.column_map.map(c => `${c.output} ← ${c.from || "(row count)"}  [${c.transform}]`)).join("\n") || "Source table")}</pre></details>
+    <h3>Columns</h3>
+    ${table([["Column", c => `<b>${esc(words(c.name))}</b><span class="devonly muted">${esc(c.name)}</span>`],
+             ["What it means", c => esc(c.description) + (c.accepted_values ? `<div class="muted">Values: ${esc(c.accepted_values.join(", "))}</div>` : "")],
+             ["Type", c => esc(c.type)], ["Tags", c => c.classification ? tagPills([c.classification]) : ""]], d.columns)}
+    <h3>Sample rows</h3><p class="muted" style="margin-top:0">Personal information is always hidden in previews.</p>
+    ${rowsTable(d.sample)}
+  </div>`;
+  $("#useDs").onclick = () => openBuilder(null, false, id);
+  $$("#dsDetail .lineage [data-ds]").forEach(b => b.onclick = () => showDataset(b.dataset.ds));
+  $("#dsDetail").scrollIntoView({behavior:"smooth"});
+}
+
+/* ---------------- Builder ---------------- */
+function newSpec(src){
+  src = src || "orders";
+  return {name:"", description:"", platform: CAT[src]?.platform || "snowflake", source: src, joins:[], filters:[], columns:[],
+          group_by:[], measures:[{agg:"count", column:null, name:"row_count"}], masks:[],
+          target:{name:"", layer:"gold", materialization:"table"}, schedule:"daily"};
+}
+async function openBuilder(spec, silent, src){
+  if(!Object.keys(CAT).length) await loadCatalog();
+  spec = spec || newSpec(src);
+  for(const k of ["joins","filters","columns","group_by","measures","masks"]) spec[k] = spec[k] || [];
+  spec.target = {layer:"gold", materialization:"table", ...(spec.target || {})};
+  B = {spec, mode: spec.measures.length || !spec.columns.length ? "totals" : "list", pipeline:null, targetTouched: !!spec.target.name, preview:null};
+  if(!silent) show("build");
+  renderBuilder();
+}
+async function openPipeline(id){
+  const p = await api("/api/pipelines/" + id);
+  await openBuilder(p.spec);
+  B.pipeline = p; renderBuilder(); renderResults();
+}
+
+function measureAutoName(m){
+  if(!m.column) return m.agg === "count" ? "row_count" : m.agg;
+  const c = m.column.split(".")[1];
+  return ({sum:"total_", avg:"avg_", count:"count_", count_distinct:"unique_", min:"min_", max:"max_"}[m.agg] || "") + c;
+}
+
+function renderBuilder(){
+  const s = B.spec, isTotals = B.mode === "totals";
+  const dsOpts = Object.values(CAT).map(d => ({value:d.id, label:`${d.friendly_name} — ${d.platform_name}${d.tags.includes("Certified") ? " ✓" : ""}`}));
+  const inScope = scopeIds(s);
+  const cols = scopeCols(s);
+  const colOpts = (filter) => scopeCols(s, filter).map(c => ({value:c.ref, label:colLabel(c.ref) + (c.classification === "PII" ? " (personal)" : "")}));
+  const numeric = c => ["integer","decimal"].includes(c.type);
+  const pii = [...new Set([...(isTotals ? s.group_by.map(g => g.column) : s.columns)].filter(r => colInfo(r).classification === "PII"))];
+
+  $("#build").innerHTML = `
+  <div class="builder">
+   <div>
+    <div class="step"><h3><span class="n">1</span>Start from</h3>
+      <p class="help">The main table your result is built on. Everything else is matched to it.</p>
+      <div class="body"><select id="src" aria-label="Starting dataset">${opts(dsOpts, s.source)}</select>
+        <div class="muted" style="margin-top:6px">${esc(CAT[s.source]?.description || "")} ${tagPills(CAT[s.source]?.tags)}</div></div></div>
+
+    <div class="step"><h3><span class="n">2</span>Add related data <span class="muted" style="font-weight:400">(optional)</span></h3>
+      <p class="help">Bring in details from another table, like a customer's region for each order. The agent matches the rows for you.</p>
+      <div class="body">
+        ${s.joins.map((j, i) => `<div class="line">
+          <b>${esc(CAT[j.dataset]?.friendly_name || j.dataset)}</b>
+          <span class="word nondev">matched on ${esc(words(j.right.split(".")[1]))}</span>
+          <span class="devonly"><select data-jl="${i}" aria-label="Left key">${opts(scopeCols({...s, joins:s.joins.slice(0,i)}).map(c=>({value:c.ref,label:c.ref})), j.left)}</select> =
+            <select data-jr="${i}" aria-label="Right key">${opts((CAT[j.dataset]?.columns||[]).map(c=>({value:`${j.dataset}.${c.name}`,label:`${j.dataset}.${c.name}`})), j.right)}</select></span>
+          <select data-jh="${i}" aria-label="Rows to keep">${opts([{value:"left",label:`Keep every ${CAT[s.source]?.friendly_name || ""} row`},{value:"inner",label:"Only keep rows that match"}], j.how)}</select>
+          <button class="x" data-jx="${i}" aria-label="Remove">×</button></div>`).join("")}
+        <select id="addJoin" aria-label="Add related data"><option value="">+ Add related data…</option>${opts(suggestJoinTargets(s), "")}</select>
+      </div></div>
+
+    <div class="step"><h3><span class="n">3</span>What should the result show?</h3>
+      <p class="help">Totals and counts summarise many rows into a few. A list keeps the individual rows.</p>
+      <div class="body">
+        <div class="seg" role="group" aria-label="Result type"><button data-mode="totals" class="${isTotals?"on":""}">Totals &amp; counts</button><button data-mode="list" class="${!isTotals?"on":""}">A list of rows</button></div>
+        ${isTotals ? `
+          <h3>Break it down by</h3>
+          ${s.group_by.map((g, i) => { const t = colInfo(g.column).type; return `<div class="line"><span class="word">for each</span><b>${esc(colLabel(g.column))}</b>
+            ${["date","timestamp"].includes(t) ? `<select data-gg="${i}" aria-label="Time period">${opts([{value:"",label:"exact value"},...["day","week","month","quarter","year"].map(x=>({value:x,label:"by "+x}))], g.grain||"")}</select>` : ""}
+            <button class="x" data-gx="${i}" aria-label="Remove">×</button></div>`; }).join("")}
+          <select id="addGroup" aria-label="Add a breakdown"><option value="">+ Add a breakdown…</option>${opts(colOpts(c => !numeric(c) || c.type === "integer" && false), "")}</select>
+          <h3>Calculate</h3>
+          ${s.measures.map((m, i) => `<div class="line">
+            <select data-ma="${i}" aria-label="Calculation">${opts([["sum","Total of"],["avg","Average of"],["count","Count of"],["count_distinct","Count of unique"],["min","Lowest"],["max","Highest"]].map(([v,l])=>({value:v,label:l})), m.agg)}</select>
+            <select data-mc="${i}" aria-label="Column">${opts([...(m.agg==="count"?[{value:"",label:"rows"}]:[]), ...colOpts(c => ["sum","avg"].includes(m.agg) ? numeric(c) : true)], m.column || "")}</select>
+            <span class="word">named</span><input type="text" data-mn="${i}" value="${esc(m.name)}" style="width:150px" aria-label="Result column name">
+            <button class="x" data-mx="${i}" aria-label="Remove">×</button></div>`).join("")}
+          <button class="btn small ghost" id="addMeasure">+ Add a calculation</button>`
+        : `<h3>Columns to keep</h3><div class="checks">${inScope.map(d => `<div class="muted" style="margin-top:6px">${esc(CAT[d]?.friendly_name)}</div>` +
+            (CAT[d]?.columns || []).map(c => { const ref = `${d}.${c.name}`; return `<label><input type="checkbox" data-col="${esc(ref)}"${s.columns.includes(ref)?" checked":""}> ${esc(words(c.name))} ${c.classification==="PII"?tagPills(["PII"]):""}<span class="muted">— ${esc(c.description)}</span></label>`; }).join("")).join("")}</div>`}
+      </div></div>
+
+    <div class="step"><h3><span class="n">4</span>Only include rows where… <span class="muted" style="font-weight:400">(optional)</span></h3>
+      <p class="help">For example: status is completed, or order date is at least 2026-07-01.</p>
+      <div class="body">
+        ${s.filters.map((f, i) => filterLine(f, i, colOpts())).join("")}
+        <button class="btn small ghost" id="addFilter">+ Add a condition</button></div></div>
+
+    ${pii.length ? `<div class="step"><h3><span class="n">5</span>Protect personal information</h3>
+      <p class="help">These columns identify real people. Company policy: they may only leave the source table protected.</p>
+      <div class="body">${pii.map(ref => { const m = s.masks.find(x => x.column === ref); return `<div class="line"><b>${esc(colLabel(ref))}</b>
+        <select data-mask="${esc(ref)}" aria-label="Protection">${opts([{value:"hash",label:"Replace with a secure code (recommended — still matchable)"},{value:"redact",label:"Hide it (***)"},{value:"",label:"Don't protect (will fail the policy check)"}], m ? m.method : "")}</select></div>`; }).join("")}</div></div>` : ""}
+
+    <div class="step"><h3><span class="n">${pii.length ? 6 : 5}</span>Where should it live?</h3>
+      <p class="help">Pick the platform. The agent writes the right code for it.</p>
+      <div class="body">
+        <div class="plats">${["databricks","snowflake","fabric"].map(p => `<button class="plat${s.platform===p?" on":""}" data-plat="${p}"><b>${PLAT[p]}</b><span class="muted">${{databricks:"Lakehouse · SQL + PySpark",snowflake:"Warehouse · SQL",fabric:"OneLake · T-SQL + PySpark"}[p]}</span></button>`).join("")}</div>
+        <div class="row" style="margin-top:6px;align-items:flex-end">
+          <div><label class="f" for="pname">Name it</label><input type="text" id="pname" value="${esc(s.name)}" placeholder="e.g. Monthly revenue by region" style="width:260px"></div>
+          <div><label class="f" for="tname">Table name</label><input type="text" id="tname" value="${esc(s.target.name)}" placeholder="monthly_revenue" style="width:220px"></div>
+        </div>
+        <div class="row" style="margin-top:4px">
+          <div><label class="f" for="layer">Quality level</label><select id="layer">${opts([{value:"gold",label:"Gold — business-ready"},{value:"silver",label:"Silver — cleaned, for analysts"}], s.target.layer)}</select></div>
+          <div><label class="f" for="mat">Save as</label><select id="mat">${opts([{value:"table",label:"Table (stored)"},{value:"view",label:"View (always live)"}], s.target.materialization)}</select></div>
+          <div><label class="f" for="sched">Refresh</label><select id="sched">${opts([["daily","Every day"],["hourly","Every hour"],["weekly","Every week"],["manual","Only when asked"]].map(([v,l])=>({value:v,label:l})), s.schedule)}</select></div>
+        </div>
+      </div></div>
+
+    <div class="row"><button class="btn gold" id="testBtn">Test it in the sandbox</button>
+      <span class="muted">Runs the real code on sample data and checks it. Nothing is deployed.</span></div>
+    <div id="results" style="margin-top:16px"></div>
+   </div>
+   <aside class="side" id="side"></aside>
+  </div>`;
+  wireBuilder();
+  renderSide(); preview();
+  if(B.pipeline) renderResults();
+}
+
+function filterLine(f, i, colOptions){
+  const c = colInfo(f.column), t = c.type || "string";
+  const ops = (["integer","decimal","date","timestamp"].includes(t) ? ["=","!=",">",">=","<","<="] : ["=","!=","in","not in"]).concat(["is null","is not null"]);
+  const OPW = {"=":"is","!=":"is not",">":"is more than",">=":"is at least","<":"is less than","<=":"is at most","in":"is one of","not in":"is not one of","is null":"is blank","is not null":"is not blank"};
+  let val = "";
+  if(!["is null","is not null"].includes(f.op)){
+    if(c.accepted_values && ["=","!="].includes(f.op)) val = `<select data-fv="${i}" aria-label="Value">${opts(c.accepted_values.map(v=>({value:v,label:v})), f.value)}</select>`;
+    else if(c.accepted_values) val = `<span>${c.accepted_values.map(v => `<label style="margin-right:8px;font-size:.88rem"><input type="checkbox" data-fvm="${i}" value="${esc(v)}"${(Array.isArray(f.value)?f.value:[f.value]).includes(v)?" checked":""}> ${esc(v)}</label>`).join("")}</span>`;
+    else val = `<input type="${t==="date"||t==="timestamp"?"date":(["integer","decimal"].includes(t)?"number":"text")}" data-fv="${i}" value="${esc(Array.isArray(f.value)?f.value.join(","):(f.value ?? ""))}" aria-label="Value" style="width:160px">`;
+  }
+  return `<div class="line"><select data-fc="${i}" aria-label="Column">${opts(colOptions, f.column)}</select>
+    <select data-fo="${i}" aria-label="Condition">${opts(ops.map(o=>({value:o,label:OPW[o]})), f.op)}</select>${val}
+    <button class="x" data-fx="${i}" aria-label="Remove">×</button></div>`;
+}
+
+function suggestJoinTargets(s){
+  const inScope = scopeIds(s);
+  const sugg = [], rest = [];
+  for(const d of Object.values(CAT)){
+    if(inScope.includes(d.id)) continue;
+    (suggestKeys(s, d.id) ? sugg : rest).push(d);
+  }
+  return [...sugg.map(d => ({value:d.id, label:`${d.friendly_name} ✓ related`})), ...rest.map(d => ({value:d.id, label:d.friendly_name}))];
+}
+function suggestKeys(s, id){
+  const inScope = scopeIds(s);
+  const same = (a, b) => a === b || CAT[a]?.curated_version === b || CAT[b]?.curated_version === a;
+  for(const d of inScope) for(const rel of (CAT[d]?.relationships || [])){
+    const [rd, rc] = rel.references.split(".");
+    if(same(rd, id)) return {left:`${d}.${rel.column}`, right:`${id}.${rc}`};
+  }
+  for(const rel of (CAT[id]?.relationships || [])){
+    const [rd, rc] = rel.references.split(".");
+    const d = inScope.find(x => same(x, rd)); if(d) return {left:`${d}.${rc}`, right:`${id}.${rel.column}`};
+  }
+  for(const d of inScope) for(const c of (CAT[d]?.columns || []))
+    if(c.name.endsWith("_id") && (CAT[id]?.columns || []).some(x => x.name === c.name)) return {left:`${d}.${c.name}`, right:`${id}.${c.name}`};
+  return null;
+}
+
+function changed(){ B.pipelineDirty = true; if(!B.targetTouched){ B.spec.target.name = B.spec.name ? slug(B.spec.name) : ""; } renderBuilder(); }
+
+function wireBuilder(){
+  const s = B.spec, on = (sel, fn) => $$(sel, $("#build")).forEach(el => fn(el));
+  $("#src").onchange = e => { const src = e.target.value; B.spec = {...newSpec(src), name:s.name, target:{...s.target}}; B.mode = "totals"; changed(); };
+  $("#addJoin").onchange = e => { const id = e.target.value; if(!id) return; const k = suggestKeys(s, id) || {left:`${s.source}.${CAT[s.source].columns[0].name}`, right:`${id}.${CAT[id].columns[0].name}`};
+    s.joins.push({dataset:id, left:k.left, right:k.right, how:"left"}); changed(); };
+  on("[data-jx]", b => b.onclick = () => { const d = s.joins[+b.dataset.jx].dataset; s.joins.splice(+b.dataset.jx, 1); dropRefs(d); changed(); });
+  on("[data-jh]", el => el.onchange = () => { s.joins[+el.dataset.jh].how = el.value; changed(); });
+  on("[data-jl]", el => el.onchange = () => { s.joins[+el.dataset.jl].left = el.value; changed(); });
+  on("[data-jr]", el => el.onchange = () => { s.joins[+el.dataset.jr].right = el.value; changed(); });
+  on("[data-mode]", b => b.onclick = () => { B.mode = b.dataset.mode;
+    if(B.mode === "list"){ s.measures = []; s.group_by = []; s.columns = s.columns.length ? s.columns : (CAT[s.source].columns.filter(c => !c.classification).slice(0,4).map(c => `${s.source}.${c.name}`)); }
+    else { s.columns = []; if(!s.measures.length) s.measures = [{agg:"count", column:null, name:"row_count"}]; }
+    changed(); });
+  const addG = $("#addGroup"); if(addG) addG.onchange = e => { if(!e.target.value) return; const t = colInfo(e.target.value).type; s.group_by.push({column:e.target.value, ...(["date","timestamp"].includes(t) ? {grain:"month"} : {})}); changed(); };
+  on("[data-gg]", el => el.onchange = () => { const g = s.group_by[+el.dataset.gg]; if(el.value) g.grain = el.value; else delete g.grain; changed(); });
+  on("[data-gx]", b => b.onclick = () => { s.group_by.splice(+b.dataset.gx, 1); changed(); });
+  const addM = $("#addMeasure"); if(addM) addM.onclick = () => { const num = scopeCols(s, c => c.type === "decimal")[0]; const m = num ? {agg:"sum", column:num.ref} : {agg:"count", column:null}; m.name = measureAutoName(m); s.measures.push(m); changed(); };
+  on("[data-ma]", el => el.onchange = () => { const m = s.measures[+el.dataset.ma]; m.agg = el.value;
+    if(["sum","avg"].includes(m.agg) && (!m.column || !["integer","decimal"].includes(colInfo(m.column).type))) m.column = (scopeCols(s, c => ["integer","decimal"].includes(c.type))[0] || {}).ref || null;
+    if(m.agg !== "count" && !m.column) m.column = scopeCols(s)[0].ref;
+    if(!m.__t) m.name = measureAutoName(m); changed(); });
+  on("[data-mc]", el => el.onchange = () => { const m = s.measures[+el.dataset.mc]; m.column = el.value || null; if(!m.__t) m.name = measureAutoName(m); changed(); });
+  on("[data-mn]", el => el.onchange = () => { const m = s.measures[+el.dataset.mn]; m.name = slug(el.value); m.__t = true; changed(); });
+  on("[data-mx]", b => b.onclick = () => { s.measures.splice(+b.dataset.mx, 1); changed(); });
+  on("[data-col]", el => el.onchange = () => { const r = el.dataset.col; s.columns = el.checked ? [...s.columns, r] : s.columns.filter(x => x !== r); changed(); });
+  $("#addFilter").onclick = () => { const st = scopeCols(s, c => c.accepted_values)[0] || scopeCols(s)[0]; s.filters.push({column:st.ref, op:"=", value: st.accepted_values ? st.accepted_values[0] : ""}); changed(); };
+  on("[data-fc]", el => el.onchange = () => { const f = s.filters[+el.dataset.fc]; f.column = el.value; const c = colInfo(f.column); f.op = "="; f.value = c.accepted_values ? c.accepted_values[0] : ""; changed(); });
+  on("[data-fo]", el => el.onchange = () => { const f = s.filters[+el.dataset.fo]; f.op = el.value;
+    if(["is null","is not null"].includes(f.op)) f.value = null; else if(["in","not in"].includes(f.op)) f.value = Array.isArray(f.value) ? f.value : (f.value ? [f.value] : []); else if(Array.isArray(f.value)) f.value = f.value[0] ?? ""; changed(); });
+  on("[data-fv]", el => el.onchange = () => { const f = s.filters[+el.dataset.fv]; const t = colInfo(f.column).type; f.value = ["integer","decimal"].includes(t) && el.value !== "" ? Number(el.value) : el.value; changed(); });
+  on("[data-fvm]", el => el.onchange = () => { const i = +el.dataset.fvm; s.filters[i].value = $$(`[data-fvm="${i}"]:checked`).map(x => x.value); changed(); });
+  on("[data-fx]", b => b.onclick = () => { s.filters.splice(+b.dataset.fx, 1); changed(); });
+  on("[data-mask]", el => el.onchange = () => { const r = el.dataset.mask; s.masks = s.masks.filter(m => m.column !== r); if(el.value) s.masks.push({column:r, method:el.value}); changed(); });
+  on("[data-plat]", b => b.onclick = () => { s.platform = b.dataset.plat; changed(); });
+  $("#pname").onchange = e => { s.name = e.target.value.trim(); changed(); };
+  $("#tname").onchange = e => { s.target.name = slug(e.target.value); B.targetTouched = !!e.target.value; changed(); };
+  $("#layer").onchange = e => { s.target.layer = e.target.value; changed(); };
+  $("#mat").onchange = e => { s.target.materialization = e.target.value; changed(); };
+  $("#sched").onchange = e => { s.schedule = e.target.value; changed(); };
+  $("#testBtn").onclick = testPipeline;
+}
+function dropRefs(d){
+  const s = B.spec, keep = r => !String(r || "").startsWith(d + ".");
+  s.filters = s.filters.filter(f => keep(f.column)); s.columns = s.columns.filter(keep);
+  s.group_by = s.group_by.filter(g => keep(g.column)); s.measures = s.measures.filter(m => !m.column || keep(m.column));
+  s.masks = s.masks.filter(m => keep(m.column));
+}
+
+let previewTimer = null;
+function preview(){
+  clearTimeout(previewTimer);
+  previewTimer = setTimeout(async () => {
+    const s = structuredClone(B.spec); if(!s.name) s.name = "Untitled pipeline"; if(!s.target.name) s.target.name = "untitled_pipeline";
+    try{ B.preview = await api("/api/compile", {json:{spec:s, pipeline_id: B.pipeline ? B.pipeline.id : null}}); }catch(e){ B.preview = {error: e.message}; }
+    renderSide();
+  }, 250);
+}
+function renderSide(){
+  const p = B.preview, el = $("#side"); if(!el) return;
+  const pl = B.pipeline;
+  el.innerHTML = `<div class="card">
+    <h2>In plain English</h2>
+    ${!p ? `<span class="spinner"></span>` : p.error ? `<div class="issue error">${esc(p.error)}</div>` : `<div class="summary">${esc(p.summary)}</div>
+      ${p.issues.filter(i => i.level === "error").map(i => `<div class="issue error">✗ ${esc(i.message)}<div class="muted">${esc(i.fix)}</div></div>`).join("")}
+      ${p.issues.filter(i => i.level === "error").length ? "" : `<p class="muted" style="margin:10px 0 0">Looks complete. Test it to see the result.</p>`}`}
+    ${pl ? `<p class="muted" style="margin:12px 0 0">Saved as pipeline #${pl.id} · version ${pl.version} ${status(pl.status)}${B.pipelineDirty ? "<br>⚠ You've changed it since the last test." : ""}</p>` : ""}
+  </div>
+  <div class="card devonly"><h2>Generated code</h2>
+    ${p && p.artifacts && p.artifacts.length ? codeViewer(p.artifacts, "side") : `<p class="muted">Code appears once the description is complete.</p>`}
+    <details class="how"><summary>Edit the spec as JSON</summary>
+      <textarea id="specJson" style="min-height:220px;font-family:ui-monospace,monospace;font-size:.78rem">${esc(JSON.stringify(B.spec, (k,v)=> k.startsWith("__") ? undefined : v, 2))}</textarea>
+      <button class="btn small" id="loadJson">Load into builder</button></details>
+  </div>`;
+  wireCode("side");
+  const lj = $("#loadJson"); if(lj) lj.onclick = () => { try{ const sp = JSON.parse($("#specJson").value); const pl = B.pipeline; openBuilder(sp, true).then(() => { B.pipeline = pl; B.pipelineDirty = true; renderSide(); }); }catch(e){ toast("That isn't valid JSON: " + e.message); } };
+}
+
+const codeState = {};
+function codeViewer(files, key){
+  const i = Math.min(codeState[key] || 0, files.length - 1);
+  return `<div class="code-tabs">${files.map((f, n) => `<button data-cv="${key}" data-i="${n}" class="${n===i?"on":""}" title="${esc(f.path)}">${esc(f.title)}</button>`).join("")}</div>
+    <div class="row" style="justify-content:space-between;margin-bottom:6px"><code class="muted" style="font-size:.78rem">${esc(files[i].path)}</code><button class="btn small ghost" data-copy="${key}">Copy</button></div>
+    <pre class="code" id="code-${key}">${esc(files[i].content)}</pre>`;
+}
+function wireCode(key){
+  $$(`[data-cv="${key}"]`).forEach(b => b.onclick = () => { codeState[key] = +b.dataset.i; key === "side" ? renderSide() : renderResults(); });
+  $$(`[data-copy="${key}"]`).forEach(b => b.onclick = async () => { try{ await navigator.clipboard.writeText($("#code-" + key).textContent); toast("Copied"); }catch{ toast("Copy isn't available here; select the code instead."); } });
+}
+
+async function testPipeline(){
+  const s = B.spec;
+  if(!s.name) s.name = B.preview?.summary ? B.preview.summary.split(" from ")[0].slice(0, 60) : "My pipeline";
+  if(!s.target.name) s.target.name = slug(s.name);
+  const btn = $("#testBtn"); btn.disabled = true; btn.innerHTML = `<span class="spinner"></span> Testing…`;
+  try{
+    let p = B.pipeline;
+    p = p ? await api(`/api/pipelines/${p.id}`, {method:"PUT", json:{spec:s, by:myName()}})
+          : await api("/api/pipelines", {json:{spec:s, by:myName()}});
+    B.pipeline = await api(`/api/pipelines/${p.id}/test`, {json:{by:myName()}});
+    B.pipeline = await api(`/api/pipelines/${p.id}`);
+    B.pipelineDirty = false;
+    renderBuilder();
+    $("#results").scrollIntoView({behavior:"smooth", block:"start"});
+  }catch(e){ toast(e.message); btn.disabled = false; btn.textContent = "Test it in the sandbox"; }
+}
+
+function renderResults(){
+  const p = B.pipeline, v = p && p.validation, el = $("#results"); if(!el || !p) return;
+  if(!v){ el.innerHTML = `<div class="card"><p>Pipeline #${p.id} is saved but not tested yet.</p></div>`; return; }
+  const ico = {PASSED:"✅", PASSED_WITH_WARNINGS:"⚠️", FAILED:"❌"}[v.status];
+  const fails = v.checks.filter(c => c.status === "FAIL"), warns = v.checks.filter(c => c.status === "WARN"), passes = v.checks.filter(c => c.status === "PASS");
+  const chk = c => `<div class="chk ${c.status}"><div class="t">${{FAIL:"❌",WARN:"⚠️",PASS:"✅"}[c.status]} ${esc(c.title)}</div>
+      <div>${esc(c.message)}</div>
+      ${c.fix && c.status !== "PASS" ? `<div class="fix"><b>What to do:</b> ${esc(c.fix)} ${c.patch ? `<button class="btn small gold" data-patch='${esc(JSON.stringify(c.patch))}'>Apply fix</button>` : ""}</div>` : ""}
+      <details class="how devonly"><summary>How this was measured</summary><pre>${esc(JSON.stringify(c.explanation, null, 2))}</pre></details></div>`;
+  const pending = p.pending_action, live = p.status === "DEPLOYED" && p.deployed_version_is_current;
+  const canRequest = v.current && v.status !== "FAILED" && !pending && !live && !B.pipelineDirty;
+  el.innerHTML = `<div class="card">
+    <div class="banner ${v.status}"><span class="ico">${ico}</span><div><b>${esc(v.headline)}</b>
+      <div class="muted">Tested on ${esc(v.platform)} code · ${v.row_count} result rows · ${v.counts.pass} checks passed${v.current ? "" : " · ⚠ an older version was tested"}</div></div></div>
+    <ol class="flow" aria-label="Progress">${p.workflow.map(w => `<li class="${w.state}">${{done:"✓ ",failed:"✗ ",current:"● ",todo:""}[w.state]}${esc(w.title)}</li>`).join("")}</ol>
+    ${fails.length ? `<h3>Fix before deploying</h3>${fails.map(chk).join("")}` : ""}
+    ${warns.length ? `<h3>Good to know</h3>${warns.map(chk).join("")}` : ""}
+    <details style="margin-top:10px"><summary class="muted">${passes.length} checks passed</summary>${passes.map(chk).join("")}</details>
+    <h3>Result preview</h3>${rowsTable(v.preview)}
+    ${v.preview.length < v.row_count ? `<p class="muted">Showing ${v.preview.length} of ${v.row_count} rows.</p>` : ""}
+    <h3>Deploy</h3>
+    ${live ? `<p>✅ This version is live as <code>${esc(p.target)}</code>.</p>${p.runs[0] ? `<details class="how"><summary>Deployment log</summary><pre>${esc(p.runs[0].log.join("\n"))}</pre></details>` : ""}`
+      : pending ? `<p>⏳ Waiting for approval (request #${pending.id}). Someone other than the requester approves it on the <button class="btn link" id="toApprovals">Approvals</button> tab.</p>`
+      : `<div class="row"><input type="text" id="reqName" placeholder="Your name" value="${esc(myName())}" style="max-width:200px" aria-label="Your name">
+          <button class="btn gold" id="reqBtn"${canRequest ? "" : " disabled"}>Request deployment</button>
+          <span class="muted">${canRequest ? `Goes to ${esc(p.target)} after a person approves it.` : v.status === "FAILED" ? "Fix the problems above and test again first." : B.pipelineDirty ? "Test your latest changes first." : ""}</span></div>`}
+  </div>
+  <div class="card devonly"><h2>Code for this version</h2>${p.artifacts && p.artifacts.length ? codeViewer(p.artifacts, "res") : `<p class="muted">Fix the design errors to generate code.</p>`}</div>`;
+  $$("#results [data-patch]").forEach(b => b.onclick = () => applyFix(JSON.parse(b.dataset.patch)));
+  const rb = $("#reqBtn"); if(rb) rb.onclick = requestDeploy;
+  const ta = $("#toApprovals"); if(ta) ta.onclick = () => show("approvals");
+  wireCode("res");
+}
+
+async function applyFix(patch){
+  try{
+    await api(`/api/pipelines/${B.pipeline.id}/fix`, {json:{patch, by:myName()}});
+    const p = await api(`/api/pipelines/${B.pipeline.id}`);
+    await loadCatalog();
+    await openBuilder(p.spec, true); B.pipeline = p; B.pipelineDirty = false; renderBuilder();
+    toast("Fix applied and re-tested");
+    $("#results").scrollIntoView({behavior:"smooth", block:"start"});
+  }catch(e){ toast(e.message); }
+}
+async function requestDeploy(){
+  const name = $("#reqName").value.trim(); if(name) store("de-name", name);
+  try{
+    await api(`/api/pipelines/${B.pipeline.id}/request-deploy`, {json:{by:name}});
+    B.pipeline = await api(`/api/pipelines/${B.pipeline.id}`);
+    renderResults(); refreshPending(); toast("Deployment requested. A person must approve it.");
+  }catch(e){ toast(e.message); }
+}
+
+/* ---------------- Approvals ---------------- */
+async function refreshPending(){
+  try{ const [a, r] = await Promise.all([api("/api/actions?status=PENDING"), api("/api/reviews?status=PENDING_REVIEW")]);
+    $("#pendingCount").textContent = a.length + r.length; return [a, r]; }catch{ return [[], []]; }
+}
+async function drawApprovals(){
+  const [acts, revs] = await refreshPending();
+  const done = (await api("/api/actions")).filter(a => a.status !== "PENDING").slice(0, 10);
+  const audit = await api("/api/audit?limit=30");
+  $("#approvals").innerHTML = `
+    <div class="card"><h2>Deployments waiting for approval</h2>
+      <p class="muted" style="margin-top:0">Read what will be deployed and what the sandbox found. The person who asked can't approve their own request, and neither can the AI.</p>
+      ${acts.map(a => { const pl = a.payload; return `<div class="rv">
+        <div class="row" style="justify-content:space-between"><b>${esc(pl.pipeline)}</b><span class="pill platpill">${esc(pl.platform)}</span></div>
+        <p style="margin:6px 0">${esc(pl.summary)}</p>
+        <div class="muted">Target <code>${esc(pl.target)}</code> · requested by ${esc(a.requested_by)} · sandbox: ${esc({PASSED:"all checks passed",PASSED_WITH_WARNINGS:`passed with ${pl.validation.warn} warning(s)`}[pl.validation.status] || pl.validation.status)}</div>
+        ${pl.warnings.length ? `<ul style="margin:8px 0">${pl.warnings.map(w => `<li>⚠ ${esc(w)}</li>`).join("")}</ul>` : ""}
+        <details class="how"><summary>Files that will be committed (${pl.files.length})</summary><pre>${esc(pl.files.join("\n"))}</pre></details>
+        <div class="row" style="margin-top:10px">
+          <input type="text" placeholder="Your name (approver)" data-who="${a.id}" style="max-width:200px" aria-label="Approver name">
+          <button class="btn gold" data-ok="${a.id}">Approve &amp; deploy</button>
+          <input type="text" placeholder="Reason, if rejecting" data-why="${a.id}" style="flex:1;min-width:180px" aria-label="Rejection reason">
+          <button class="btn ghost" data-no="${a.id}">Reject</button>
+          <button class="btn link" data-open="${a.pipeline_id}">Open pipeline</button></div>
+      </div>`; }).join("") || `<p class="muted">Nothing is waiting.</p>`}
+    </div>
+    <div class="card"><h2>AI answers waiting for review</h2>
+      <p class="muted" style="margin-top:0">Every AI answer is a draft until a person approves, edits or rejects it.</p>
+      ${revs.map(r => `<div class="rv">
+        <div class="muted">Question: “${esc(r.prompt)}”</div>
+        <div class="answer" style="margin:8px 0">${md(r.ai_output)}</div>
+        <div class="muted">${r.grounded ? "✓ Numbers verified against tool results" : `⚠ Unverified numbers: ${esc(r.unverified_numbers.join(", "))} — edit them out or reject`}</div>
+        <textarea data-edit="${r.id}" class="hidden" aria-label="Edited answer">${esc(r.ai_output)}</textarea>
+        <div class="row" style="margin-top:8px">
+          <input type="text" placeholder="Your name (reviewer)" data-rwho="${r.id}" style="max-width:200px" aria-label="Reviewer name">
+          <button class="btn gold" data-rok="${r.id}">Approve</button>
+          <button class="btn ghost" data-redit="${r.id}">Edit, then approve</button>
+          <input type="text" placeholder="Reason, if rejecting" data-rwhy="${r.id}" style="flex:1;min-width:160px" aria-label="Rejection reason">
+          <button class="btn ghost" data-rno="${r.id}">Reject</button></div>
+      </div>`).join("") || `<p class="muted">Nothing is waiting.</p>`}
+    </div>
+    <div class="card"><h2>Recent decisions</h2>
+      ${table([["#", a => esc(a.id)], ["Pipeline", a => esc(a.payload.pipeline)], ["Outcome", a => esc(a.status)], ["Decided by", a => esc(a.decided_by || "—")], ["Result", a => esc(a.result || "")]], done)}
+      <details class="how"><summary>Audit trail (latest 30 events)</summary>
+        ${table([["When", e => esc(e.at.replace("T"," ").slice(0,19))], ["Who", e => esc(e.actor)], ["Event", e => esc(e.event)], ["Detail", e => `<code style="font-size:.74rem">${esc(JSON.stringify(e.detail)).slice(0,160)}</code>`]], audit)}</details>
+    </div>`;
+  const root = $("#approvals");
+  $$("[data-ok]", root).forEach(b => b.onclick = () => decideAction(+b.dataset.ok, true));
+  $$("[data-no]", root).forEach(b => b.onclick = () => decideAction(+b.dataset.no, false));
+  $$("[data-open]", root).forEach(b => b.onclick = () => openPipeline(+b.dataset.open));
+  $$("[data-rok]", root).forEach(b => b.onclick = () => decideReview(+b.dataset.rok, "approve"));
+  $$("[data-rno]", root).forEach(b => b.onclick = () => decideReview(+b.dataset.rno, "reject"));
+  $$("[data-redit]", root).forEach(b => b.onclick = () => { const t = $(`[data-edit="${b.dataset.redit}"]`, root);
+    if(t.classList.contains("hidden")){ t.classList.remove("hidden"); b.textContent = "Save edit & approve"; t.focus(); } else decideReview(+b.dataset.redit, "edit"); });
+}
+async function decideAction(id, approve){
+  const root = $("#approvals");
+  const who = $(`[data-who="${id}"]`, root).value.trim(), why = $(`[data-why="${id}"]`, root).value.trim();
+  if(!who) return toast("Enter your name to approve or reject.");
+  try{ const r = await api(`/api/actions/${id}/decision`, {json:{approve, decided_by:who, reason:why}});
+    toast(approve ? "Deployed. " + r.result : "Rejected."); await loadCatalog(); drawApprovals(); }
+  catch(e){ toast(e.message); }
+}
+async function decideReview(id, decision){
+  const root = $("#approvals");
+  const who = $(`[data-rwho="${id}"]`, root).value.trim(); if(!who) return toast("Enter your name to review.");
+  const body = {decision, reviewer:who, reason: $(`[data-rwhy="${id}"]`, root).value.trim() || null,
+                edited_output: decision === "edit" ? $(`[data-edit="${id}"]`, root).value : null};
+  try{ await api(`/api/reviews/${id}/decision`, {json:body}); toast("Decision recorded."); drawApprovals(); }
+  catch(e){ toast(e.message); }
+}
+
+/* boot */
+loaders.start(); loaded.start = true; refreshPending();
+</script>
+</body>
+</html>
