@@ -314,8 +314,9 @@ def _publish_dataset(s, row, spec, r, catalog, result, approver) -> None:
         tags.add("PII-masked")
     cmap = compiler.column_map(r)
     descr = {c["output"]: (c["transform"].capitalize() if c["from"] is None else
-                           f"{c['transform'].capitalize()} {c['from']}" if c["transform"].endswith(" of") else
-                           f"{c['transform'].capitalize()} from {c['from']}") for c in cmap}
+                           f"{c['transform'].capitalize()} from {c['from']}" if c["transform"].startswith(
+                               ("copied", "truncated")) else
+                           f"{c['transform'].capitalize()} {c['from']}") for c in cmap}
     cols = [{"name": c["name"], "type": c["type"], "description": descr.get(c["name"], ""),
              **({"classification": c["classification"]} if c.get("classification") else {})}
             for c in result["schema"]]

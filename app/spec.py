@@ -26,6 +26,9 @@ PLATFORM_NAMES = {"databricks": "Databricks", "snowflake": "Snowflake", "fabric"
 AGGS = ("sum", "avg", "count", "count_distinct", "min", "max")
 AGG_WORDS = {"sum": "Total", "avg": "Average", "count": "Count", "count_distinct": "Count of unique",
              "min": "Lowest", "max": "Highest"}
+# How a measure reads in front of a column name: "total of orders.amount", "lowest orders.amount".
+AGG_PHRASE = {"sum": "total of", "avg": "average of", "count": "count of", "count_distinct": "count of unique",
+              "min": "lowest", "max": "highest"}
 GRAINS = ("day", "week", "month", "quarter", "year")
 OPS = ("=", "!=", ">", ">=", "<", "<=", "in", "not in", "is null", "is not null")
 OP_WORDS = {"=": "is", "!=": "is not", ">": "is more than", ">=": "is at least", "<": "is less than",

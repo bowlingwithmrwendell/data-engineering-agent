@@ -14,7 +14,7 @@ from __future__ import annotations
 import json
 
 from . import connectors
-from .spec import AGG_WORDS, PLATFORM_NAMES, Resolved, spec_hash, summarize
+from .spec import AGG_PHRASE, PLATFORM_NAMES, Resolved, spec_hash, summarize
 
 INDENT = "    "
 
@@ -322,12 +322,15 @@ def dbt(r: Resolved, catalog: dict) -> tuple[str, str]:
         Y.append(f"      - name: {o['name']}")
         tests = []
         if o["kind"] == "group":
-            tests.append("not_null")
+            # Blank or unexpected values are warnings in the sandbox, so they warn in dbt too;
+            # a broken grain (duplicates) is an error in both.
+            tests.append("not_null:\n              config: {severity: warn}")
             if len(groups) == 1:
                 tests.append("unique")
             av = (o.get("column") or {}).get("accepted_values")
             if av and not o.get("grain") and not o.get("mask"):
-                tests.append("accepted_values: {values: " + json.dumps(av) + "}")
+                tests.append("accepted_values:\n              values: " + json.dumps(av)
+                             + "\n              config: {severity: warn}")
         if o["kind"] == "measure" and o["agg"] in ("count", "count_distinct"):
             tests.append("not_null")
         if o["kind"] == "measure":
@@ -341,7 +344,7 @@ def dbt(r: Resolved, catalog: dict) -> tuple[str, str]:
 def _measure_words(o: dict) -> str:
     if o["ref"] is None:
         return "Number of rows"
-    return f"{AGG_WORDS[o['agg']]} of {o['ref']}"
+    return f"{AGG_PHRASE[o['agg']].capitalize()} {o['ref']}"
 
 
 def column_map(r: Resolved) -> list[dict]:
@@ -350,7 +353,7 @@ def column_map(r: Resolved) -> list[dict]:
     for o in r.outputs:
         frm = None if o["ref"] is None else f"{o['dataset']}.{o['column']['name']}"
         if o["kind"] == "measure":
-            how = "count of rows" if frm is None else AGG_WORDS[o["agg"]].lower() + " of"
+            how = "count of rows" if frm is None else AGG_PHRASE[o["agg"]]
         else:
             how = "copied"
             if o.get("grain"):

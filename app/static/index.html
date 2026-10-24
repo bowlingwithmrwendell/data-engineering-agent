@@ -658,7 +658,7 @@ function renderSide(){
     <h2>In plain English</h2>
     ${!p ? `<span class="spinner"></span>` : p.error ? `<div class="issue error">${esc(p.error)}</div>` : `<div class="summary">${esc(p.summary)}</div>
       ${p.issues.filter(i => i.level === "error").map(i => `<div class="issue error">✗ ${esc(i.message)}<div class="muted">${esc(i.fix)}</div></div>`).join("")}
-      ${p.issues.filter(i => i.level === "error").length ? "" : `<p class="muted" style="margin:10px 0 0">Looks complete. Test it to see the result.</p>`}`}
+      ${p.issues.filter(i => i.level === "error").length || (pl && !B.pipelineDirty) ? "" : `<p class="muted" style="margin:10px 0 0">Looks complete. Test it to see the result.</p>`}`}
     ${pl ? `<p class="muted" style="margin:12px 0 0">Saved as pipeline #${pl.id} · version ${pl.version} ${status(pl.status)}${B.pipelineDirty ? "<br>⚠ You've changed it since the last test." : ""}</p>` : ""}
   </div>
   <div class="card devonly"><h2>Generated code</h2>
