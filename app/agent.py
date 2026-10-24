@@ -28,6 +28,7 @@ from sqlalchemy.orm import Session
 from . import actions, config, governance, information, orchestration
 from .connectors import REGISTRY
 from .grounding import is_grounded
+from .migration import ConformSpec
 from .spec import PipelineSpec
 
 SYSTEM_PROMPT = """\
@@ -51,6 +52,18 @@ HOW YOU WORK (always in this order):
    code is on its Code tab).
 6. Only call request_deployment if the person asked to deploy/publish/ship it. Tell them a
    named human must approve it; you cannot deploy.
+
+MIGRATIONS (an acquired company, or moving platforms):
+- To bring another company's data onto ours, use draft_conform_pipeline: define OUR standard model
+  (column names, types, key, required, allowed values), then map each source onto it: rename
+  columns, convert types (cast), translate codes (value_map), and swap their IDs for ours through a
+  crosswalk table (lookup). Acquired datasets are tagged "Acquired" in the catalog.
+- test_pipeline then reconciles: every source row arrives once, totals are preserved, unreadable
+  values and crosswalk misses are counted, keys don't collide between companies. Explain each
+  finding in business terms (e.g. "8 customers already shop with us").
+- If the person pastes legacy SQL, draft the equivalent pipeline and call compare_with_legacy to
+  prove both return the same rows. Never claim equivalence without that result.
+- For a platform move use replatform_plan, and reconcile_tables to compare an old and a new table.
 
 GOVERNANCE RULES (non-negotiable):
 - Never state a number that is not in a tool result. Never estimate or calculate figures.
@@ -79,6 +92,7 @@ def _inline(schema: dict) -> dict:
 
 
 SPEC_SCHEMA = _inline(PipelineSpec.model_json_schema())
+CONFORM_SCHEMA = _inline(ConformSpec.model_json_schema())
 
 TOOLS = [
     {"name": "search_catalog",
@@ -111,6 +125,31 @@ TOOLS = [
      "input_schema": {"type": "object", "properties": {"pipeline_id": {"type": "integer"},
                                                        "patch": {"type": "object"}},
                       "required": ["pipeline_id", "patch"]}},
+    {"name": "draft_conform_pipeline",
+     "description": "Create a DRAFT migration pipeline that maps one or more sources (e.g. ours and an acquired "
+                    "company's) onto one standard model and stacks them with a source_system column. Mappings "
+                    "use bare column names of each source.",
+     "input_schema": {"type": "object", "properties": {"spec": CONFORM_SCHEMA}, "required": ["spec"]}},
+    {"name": "revise_conform_pipeline",
+     "description": "Replace the spec of an existing migration (conform) pipeline.",
+     "input_schema": {"type": "object", "properties": {"pipeline_id": {"type": "integer"}, "spec": CONFORM_SCHEMA},
+                      "required": ["pipeline_id", "spec"]}},
+    {"name": "compare_with_legacy",
+     "description": "Run a legacy SELECT query and a pipeline on the same sample data and report whether the "
+                    "results are equivalent (row by row).",
+     "input_schema": {"type": "object", "properties": {"pipeline_id": {"type": "integer"}, "sql": {"type": "string"}},
+                      "required": ["pipeline_id", "sql"]}},
+    {"name": "reconcile_tables",
+     "description": "Compare two catalog tables: row counts, keys only on one side, and totals per key.",
+     "input_schema": {"type": "object", "properties": {
+         "left": {"type": "string"}, "right": {"type": "string"},
+         "key": {"type": "string", "description": "Column in both, or 'left_col=right_col'"},
+         "measures": {"type": "array", "items": {"type": "string"}}}, "required": ["left", "right", "key"]}},
+    {"name": "replatform_plan",
+     "description": "What changes if every pipeline moves to another platform (new table names, cross-platform reads).",
+     "input_schema": {"type": "object", "properties": {"platform": {"type": "string",
+                                                                    "enum": ["databricks", "snowflake", "fabric"]}},
+                      "required": ["platform"]}},
     {"name": "request_deployment",
      "description": "Queue a tested pipeline for deployment. Does NOT deploy: a named human must approve.",
      "input_schema": {"type": "object", "properties": {"pipeline_id": {"type": "integer"}},
@@ -118,7 +157,8 @@ TOOLS = [
 ]
 
 
-PIPELINE_TOOLS = {"draft_pipeline", "revise_pipeline", "test_pipeline", "apply_fix", "request_deployment"}
+PIPELINE_TOOLS = {"draft_pipeline", "revise_pipeline", "test_pipeline", "apply_fix", "request_deployment",
+                  "draft_conform_pipeline", "revise_conform_pipeline"}
 
 
 def _compact_pipeline(p: dict) -> dict:
@@ -153,6 +193,19 @@ def run_tool(s: Session, name: str, args: dict, by: str = "agent") -> dict:
         return _compact_pipeline(orchestration.validate(s, int(args["pipeline_id"]), by))
     if name == "apply_fix":
         return _compact_pipeline(orchestration.fix(s, int(args["pipeline_id"]), args["patch"], by))
+    if name == "draft_conform_pipeline":
+        return _compact_pipeline(orchestration.create(s, {**args["spec"], "kind": "conform"}, by))
+    if name == "revise_conform_pipeline":
+        return _compact_pipeline(orchestration.update(s, int(args["pipeline_id"]),
+                                                      {**args["spec"], "kind": "conform"}, by))
+    if name == "compare_with_legacy":
+        r = orchestration.compare_legacy(s, int(args["pipeline_id"]), args["sql"], by)
+        return {k: r[k] for k in r if k not in ("explanation",)}
+    if name == "reconcile_tables":
+        return orchestration.reconcile_tables(s, args["left"], args["right"], args["key"],
+                                              list(args.get("measures") or []), by)
+    if name == "replatform_plan":
+        return orchestration.replatform_plan(s, args["platform"])
     if name == "request_deployment":
         out = orchestration.propose_deploy(s, int(args["pipeline_id"]), by)
         return {"pipeline": _compact_pipeline(out["pipeline"]), "approval_request": out["action"]["id"],

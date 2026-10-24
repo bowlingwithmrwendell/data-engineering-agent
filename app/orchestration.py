@@ -23,8 +23,9 @@ from datetime import datetime, timezone
 from pydantic import ValidationError
 from sqlalchemy.orm import Session
 
-from . import actions, compiler, config, connectors, information, sandbox
-from .models import DatasetRow, LineageRow, PendingActionRow, PipelineRow, RunRow, ValidationRow
+from . import actions, compiler, config, connectors, information, migration, sandbox
+from .models import (DatasetRow, LegacyCompareRow, LineageRow, PendingActionRow, PipelineRow, RunRow,
+                     ValidationRow)
 from .spec import PLATFORM_NAMES, Issue, PipelineSpec, resolve, spec_hash, summarize
 
 STATES = ("DRAFT", "VALIDATED", "FAILED_VALIDATION", "PENDING_APPROVAL", "DEPLOYED", "REJECTED")
@@ -43,8 +44,11 @@ def _now():
 
 # --- spec handling --------------------------------------------------------------------
 
-def parse_spec(data: dict) -> PipelineSpec:
+def parse_spec(data: dict) -> PipelineSpec | migration.ConformSpec:
+    """A standard pipeline spec, or a conform (migration) spec when kind == 'conform'."""
     try:
+        if migration.is_conform(data):
+            return migration.ConformSpec.model_validate(data)
         return PipelineSpec.model_validate(data)
     except ValidationError as exc:
         msgs = []
@@ -57,14 +61,15 @@ def parse_spec(data: dict) -> PipelineSpec:
 def check(s: Session, spec: PipelineSpec, pipeline_id: int | None = None):
     """Resolve the spec against the catalog. Returns (resolved|None, issues, catalog)."""
     catalog = information.catalog_map(s)
-    resolved, issues = resolve(spec, catalog)
+    conform = isinstance(spec, migration.ConformSpec)
+    resolved, issues = (migration.resolve if conform else resolve)(spec, catalog)
     t = spec.target.name
     existing = catalog.get(t)
     if existing and existing["origin"] == "pipeline" and existing["pipeline_id"] != pipeline_id:
         issues.append(Issue("error", "TARGET_TAKEN",
                             f"'{t}' is already published by pipeline #{existing['pipeline_id']}.",
                             "Choose another name.", {"op": "rename_target", "to": f"{t}_v2"}))
-    used = [spec.source] + [j.dataset for j in spec.joins]
+    used = ([x.dataset for x in spec.sources] if conform else [spec.source] + [j.dataset for j in spec.joins])
     if t in used:
         issues.append(Issue("error", "TARGET_IS_INPUT", f"'{t}' can't read from itself.",
                             "Choose another name for the result.", {"op": "rename_target", "to": f"{t}_v2"}))
@@ -76,13 +81,34 @@ def compile_preview(s: Session, data: dict, pipeline_id: int | None = None) -> d
     spec = parse_spec(data)
     r, issues, catalog = check(s, spec, pipeline_id)
     errors = [i for i in issues if i.level == "error"]
-    return {"summary": summarize(spec, catalog), "spec_hash": spec_hash(spec),
+    return {"summary": summary(spec, catalog), "spec_hash": spec_hash(spec),
             "issues": [i.as_dict() for i in issues], "ready_to_test": not errors,
-            "artifacts": compiler.artifacts(r, catalog) if r and not errors else []}
+            "artifacts": artifacts(r, catalog) if r and not errors else []}
+
+
+# --- dispatch by pipeline kind ------------------------------------------------------------------
+
+def summary(spec, catalog) -> str:
+    return (migration.summarize if isinstance(spec, migration.ConformSpec) else summarize)(spec, catalog)
+
+
+def artifacts(r, catalog) -> list[dict]:
+    if isinstance(r.spec, migration.ConformSpec):
+        return migration.artifacts(r, catalog, spec_hash(r.spec))
+    return compiler.artifacts(r, catalog)
+
+
+def column_map(r) -> list[dict]:
+    return (migration.column_map if isinstance(r.spec, migration.ConformSpec) else compiler.column_map)(r)
 
 
 def apply_patch(data: dict, patch: dict) -> dict:
     """Apply one suggested fix to a spec dict. Unknown ops are refused."""
+    if migration.is_conform(data):
+        try:
+            return migration.apply_patch(data, patch)
+        except (ValueError, KeyError) as exc:
+            raise WorkflowError(str(exc), 422) from exc
     d = copy.deepcopy(data)
     op = patch.get("op")
 
@@ -228,9 +254,12 @@ def _run_sandbox(s: Session, spec: PipelineSpec, pipeline_id: int | None) -> dic
                                    "reasoning": "Checked against the catalog before running."}}
                   for i in issues]
         return {"status": "FAILED", "headline": f"Not ready: {len(checks)} problem(s) to fix",
+                "kind": getattr(spec, "kind", "standard"),
                 "platform": PLATFORM_NAMES[spec.platform],
                 "counts": {"fail": len(checks), "warn": 0, "pass": 0}, "checks": checks, "row_count": 0,
                 "schema": [], "preview": [], "rows": [], "elapsed_ms": 0, "sandbox_sql": None}
+    if isinstance(spec, migration.ConformSpec):
+        return {**migration.run(r, issues), "kind": "conform"}
     return sandbox.run(r, issues)
 
 
@@ -260,13 +289,16 @@ def propose_deploy(s: Session, pipeline_id: int, requested_by: str = "") -> dict
     spec = parse_spec(row.spec)
     conn = connectors.get(spec.platform)
     r, _, catalog = check(s, spec, row.id)
-    files = [f["path"] for f in compiler.artifacts(r, catalog)]
+    files = [f["path"] for f in artifacts(r, catalog)]
     payload = {"pipeline": row.name, "spec_hash": row.spec_hash, "version": row.version,
                "platform": PLATFORM_NAMES[spec.platform],
                "target": conn.target_name(spec.target.layer, spec.target.name),
-               "summary": summarize(spec, catalog), "validation": {"status": v.status, **v.result["counts"]},
+               "summary": summary(spec, catalog), "validation": {"status": v.status, **v.result["counts"]},
                "warnings": [c["message"] for c in v.result["checks"] if c["status"] == "WARN"],
-               "files": files}
+               "files": files, "kind": getattr(spec, "kind", "standard")}
+    lc = latest_legacy(s, row)
+    if lc and lc.spec_hash == row.spec_hash:
+        payload["legacy_comparison"] = {"status": lc.status, "headline": lc.result.get("headline")}
     action = actions.propose(s, "DEPLOY_PIPELINE", payload, requested_by or "anonymous", row.id)
     row.status = "PENDING_APPROVAL"
     s.commit()
@@ -293,7 +325,7 @@ def deploy(s: Session, pipeline_id: int, approved_hash: str | None, approver: st
     r, _, catalog = check(s, spec, row.id)
     conn = connectors.get(spec.platform)
     target = conn.target_name(spec.target.layer, spec.target.name)
-    files = [f["path"] for f in compiler.artifacts(r, catalog)]
+    files = [f["path"] for f in artifacts(r, catalog)]
     out = conn.deploy(pipeline_id=row.id, target=target, rows_written=len(result["rows"]), files=files)
     s.add(RunRow(pipeline_id=row.id, platform=spec.platform, job_id=out["job_id"], status=out["status"],
                  rows_written=out["rows_written"], duration_ms=out["duration_ms"], log=out["log"],
@@ -312,7 +344,7 @@ def _publish_dataset(s, row, spec, r, catalog, result, approver) -> None:
         tags |= {t for t in d["tags"] if t in ("Confidential", "Finance", "Internal")}
     if spec.masks:
         tags.add("PII-masked")
-    cmap = compiler.column_map(r)
+    cmap = column_map(r)
     descr = {c["output"]: (c["transform"].capitalize() if c["from"] is None else
                            f"{c['transform'].capitalize()} from {c['from']}" if c["transform"].startswith(
                                ("copied", "truncated")) else
@@ -325,7 +357,9 @@ def _publish_dataset(s, row, spec, r, catalog, result, approver) -> None:
         ds = DatasetRow(id=spec.target.name)
         s.add(ds)
     ds.friendly_name = spec.name
-    ds.description = summarize(spec, catalog)
+    ds.description = summary(spec, catalog)
+    if isinstance(spec, migration.ConformSpec):
+        tags.add("Conformed")
     ds.layer, ds.platform = spec.target.layer, spec.platform
     ds.owner = f"Published by the Data Engineering Agent · approved by {approver}"
     ds.tags = sorted(tags) or ["Internal"]
@@ -376,7 +410,7 @@ def pipeline_dict(s: Session, row: PipelineRow, with_code: bool = False) -> dict
                                                 PendingActionRow.status == "PENDING").first())
     conn = connectors.get(spec.platform)
     out = {"id": row.id, "name": row.name, "status": row.status, "version": row.version,
-           "spec": row.spec, "spec_hash": row.spec_hash, "summary": summarize(spec, catalog),
+           "spec": row.spec, "spec_hash": row.spec_hash, "summary": summary(spec, catalog),
            "platform": spec.platform, "platform_name": PLATFORM_NAMES[spec.platform],
            "target": conn.target_name(spec.target.layer, spec.target.name),
            "created_by": row.created_by, "created_at": row.created_at.isoformat() if row.created_at else None,
@@ -388,10 +422,15 @@ def pipeline_dict(s: Session, row: PipelineRow, with_code: bool = False) -> dict
                                                  "at": v.at.isoformat() if v.at else None, **v.result},
            "pending_action": actions.action_dict(pending) if pending else None,
            "workflow": workflow(row, v, pending is not None),
-           "runs": information.runs(s, row.id, limit=5)}
+           "runs": information.runs(s, row.id, limit=5),
+           "kind": getattr(spec, "kind", "standard")}
+    lc = latest_legacy(s, row)
+    out["legacy_comparison"] = None if lc is None else {
+        "id": lc.id, "status": lc.status, "current": lc.spec_hash == row.spec_hash, "sql": lc.legacy_sql,
+        "at": lc.at.isoformat() if lc.at else None, **lc.result}
     if with_code:
         errors = [i for i in issues if i.level == "error"]
-        out["artifacts"] = compiler.artifacts(r, catalog) if r and not errors else []
+        out["artifacts"] = artifacts(r, catalog) if r and not errors else []
     return out
 
 
@@ -401,9 +440,101 @@ def list_pipelines(s: Session) -> list[dict]:
         v = latest_validation(s, row)
         spec = row.spec
         out.append({"id": row.id, "name": row.name, "status": row.status, "version": row.version,
+                    "kind": spec.get("kind", "standard"),
                     "platform": spec["platform"], "platform_name": PLATFORM_NAMES[spec["platform"]],
                     "target": spec["target"]["name"],
                     "last_test": None if v is None else {"status": v.status,
                                                          "current": v.spec_hash == row.spec_hash},
                     "updated_at": row.updated_at.isoformat() if row.updated_at else None})
+    return out
+
+
+# --- Migration mode -------------------------------------------------------------------------------
+
+def latest_legacy(s: Session, row: PipelineRow) -> LegacyCompareRow | None:
+    return (s.query(LegacyCompareRow).filter(LegacyCompareRow.pipeline_id == row.id)
+            .order_by(LegacyCompareRow.id.desc()).first())
+
+
+def compare_legacy(s: Session, pipeline_id: int, sql: str, by: str = "") -> dict:
+    """Run the legacy query and this pipeline on the same sample data and compare the results."""
+    import sqlite3
+    row = _get(s, pipeline_id)
+    spec = parse_spec(row.spec)
+    if not (sql or "").strip():
+        raise WorkflowError("Paste the legacy SQL to compare.", 422)
+    if len(sql) > 20_000:
+        raise WorkflowError("That query is too long for the sandbox (20,000 characters max).", 413)
+    new = _run_sandbox(s, spec, row.id)
+    if new["status"] == "FAILED" and not new["rows"] and new["counts"]["pass"] == 0:
+        result = {"status": "COULD_NOT_RUN", "headline": "Fix the pipeline first",
+                  "message": "The pipeline doesn't run yet, so there's nothing to compare."}
+    else:
+        try:
+            cols, legacy_rows = migration.run_legacy(sql, information.catalog_map(s))
+            result = migration.compare(cols, legacy_rows, new["rows"])
+        except ValueError as exc:
+            result = {"status": "COULD_NOT_RUN", "headline": "Can't run that query", "message": str(exc)}
+        except sqlite3.Error as exc:
+            msg = str(exc)
+            hint = ("The sandbox only allows reading data." if "not authorized" in msg else
+                    "The sandbox speaks standard SQL; platform-specific functions may need rewriting before "
+                    "comparing, or compare the outputs on the platform itself.")
+            result = {"status": "COULD_NOT_RUN", "headline": "The legacy query didn't run in the sandbox",
+                      "message": f"{msg}. {hint}"}
+    s.add(LegacyCompareRow(pipeline_id=row.id, spec_hash=row.spec_hash, legacy_sql=sql.strip(),
+                           status=result["status"], result=result, by=by or ""))
+    actions.audit(s, by, "LEGACY_COMPARE", {"pipeline_id": row.id, "spec_hash": row.spec_hash,
+                                           "status": result["status"]})
+    s.commit()
+    return {**result, "pipeline_id": row.id, "spec_hash": row.spec_hash}
+
+
+def reconcile_tables(s: Session, left: str, right: str, key: str, measures: list[str], by: str = "") -> dict:
+    cat = information.catalog_map(s)
+    for d in (left, right):
+        if d not in cat:
+            raise WorkflowError(f"No dataset '{d}' in the catalog.", 404)
+    try:
+        out = migration.reconcile(cat[left], cat[right], key, measures)
+    except ValueError as exc:
+        raise WorkflowError(str(exc), 422) from exc
+    actions.audit(s, by, "RECONCILE", {"left": left, "right": right, "key": key, "status": out["status"]})
+    s.commit()
+    return out
+
+
+def replatform_plan(s: Session, platform: str) -> dict:
+    """What changes if every pipeline moves to `platform`."""
+    conn = connectors.get(platform)
+    cat = information.catalog_map(s)
+    items = []
+    for row in s.query(PipelineRow).order_by(PipelineRow.id):
+        spec = row.spec
+        used = ([x["dataset"] for x in spec["sources"]] if spec.get("kind") == "conform"
+                else [spec["source"]] + [j["dataset"] for j in spec.get("joins", [])])
+        cross = sorted({cat[d]["friendly_name"] for d in used if d in cat and cat[d]["platform"] != platform
+                        and cat[d]["origin"] == "seed"})
+        items.append({"pipeline_id": row.id, "name": row.name, "status": row.status,
+                      "kind": spec.get("kind", "standard"),
+                      "from": PLATFORM_NAMES[spec["platform"]], "already_there": spec["platform"] == platform,
+                      "new_target": conn.target_name(spec["target"]["layer"], f"{spec['target']['name']}_{platform}"),
+                      "reads_from_other_platforms": cross,
+                      "code": ["SQL", "dbt"] + (["PySpark"] if conn.supports_pyspark else []),
+                      "steps": ["Open as a draft on " + conn.label, "Test in the sandbox",
+                                "Approve and deploy", "Reconcile the old and new tables"]})
+    return {"platform": conn.label, "pipelines": items,
+            "note": ("Specs recompile for the new platform automatically. Source data that stays on another "
+                     "platform must be replicated or federated first.")}
+
+
+def replatform(s: Session, pipeline_id: int, platform: str, by: str = "") -> dict:
+    row = _get(s, pipeline_id)
+    connectors.get(platform)
+    if row.spec["platform"] == platform:
+        raise WorkflowError(f"Pipeline #{row.id} already runs on {PLATFORM_NAMES[platform]}.", 409)
+    out = create(s, migration.replatform_spec(row.spec, platform), by)
+    actions.audit(s, by, "REPLATFORM_DRAFTED", {"from_pipeline": row.id, "to_pipeline": out["id"],
+                                               "platform": platform})
+    s.commit()
     return out

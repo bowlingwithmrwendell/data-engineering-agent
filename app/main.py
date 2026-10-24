@@ -16,7 +16,7 @@ from . import actions, agent, config, governance, information, orchestration
 from .connectors import REGISTRY
 from .db import Base, SessionLocal, engine, get_session
 from .models import AICallRow, AIReviewRow, AuditRow
-from .seed import EXAMPLES, seed
+from .seed import CONFORM_EXAMPLES, EXAMPLES, LEGACY_EXAMPLE, seed
 
 STATIC = Path(__file__).parent / "static"
 
@@ -132,6 +132,35 @@ class FixIn(BaseModel):
 
 
 class ByIn(BaseModel):
+    by: str = Field(default="", max_length=120)
+
+
+class LegacyIn(BaseModel):
+    sql: str = Field(min_length=6, max_length=20_000)
+    by: str = Field(default="", max_length=120)
+
+
+class ReconcileIn(BaseModel):
+    left: str
+    right: str
+    key: str = Field(description="Key column in both tables, or 'left_col=right_col'")
+    measures: list[str] = Field(default_factory=list, max_length=10)
+    by: str = Field(default="", max_length=120)
+
+
+class ReplatformIn(BaseModel):
+    platform: Literal["databricks", "snowflake", "fabric"]
+    by: str = Field(default="", max_length=120)
+
+
+class ImportIn(BaseModel):
+    platform: Literal["databricks", "snowflake", "fabric"]
+    owner: str = Field(default="", max_length=120)
+    tags: list[str] = Field(default_factory=lambda: ["Acquired"])
+    layer: Literal["bronze", "silver", "gold"] = "bronze"
+    schema_csv: str | None = Field(default=None, max_length=30_000,
+                                   description="'table,column,type' lines, e.g. an information_schema export")
+    tables: list[dict] | None = None
     by: str = Field(default="", max_length=120)
 
 
@@ -260,6 +289,49 @@ def request_deploy(pipeline_id: int, body: ByIn | None = None, s: Session = Depe
     return _wf(orchestration.propose_deploy, s, pipeline_id, body.by if body else "")
 
 
+# --- Migration mode -------------------------------------------------------------------------
+
+@app.get("/api/migration/examples", tags=["Migration"])
+def migration_examples():
+    return {"conform": CONFORM_EXAMPLES, "legacy": LEGACY_EXAMPLE}
+
+
+@app.post("/api/pipelines/{pipeline_id}/compare-legacy", tags=["Migration"])
+def compare_legacy(pipeline_id: int, body: LegacyIn, s: Session = Depends(get_session)):
+    """Run a legacy SELECT and this pipeline on the same sample data; report whether the results match."""
+    return _wf(orchestration.compare_legacy, s, pipeline_id, body.sql, body.by)
+
+
+@app.post("/api/reconcile", tags=["Migration"])
+def reconcile(body: ReconcileIn, s: Session = Depends(get_session)):
+    """Compare two tables: row counts, keys on each side, and per-key totals of each measure."""
+    return _wf(orchestration.reconcile_tables, s, body.left, body.right, body.key, body.measures, body.by)
+
+
+@app.get("/api/migration/replatform", tags=["Migration"])
+def replatform_plan(platform: Literal["databricks", "snowflake", "fabric"], s: Session = Depends(get_session)):
+    return orchestration.replatform_plan(s, platform)
+
+
+@app.post("/api/pipelines/{pipeline_id}/replatform", status_code=201, tags=["Migration"])
+def replatform(pipeline_id: int, body: ReplatformIn, s: Session = Depends(get_session)):
+    """Copy a pipeline as a draft on another platform (recompiled automatically)."""
+    return _wf(orchestration.replatform, s, pipeline_id, body.platform, body.by)
+
+
+@app.post("/api/catalog/import", status_code=201, tags=["Migration"])
+def import_catalog(body: ImportIn, s: Session = Depends(get_session)):
+    """Onboard another company's tables from a schema export, with PII tagged from column names."""
+    from . import migration
+    tables = body.tables or migration.parse_schema_csv(body.schema_csv or "")
+    if not tables:
+        raise HTTPException(422, "Nothing to import: paste 'table,column,type' lines.")
+    if len(tables) > 50:
+        raise HTTPException(413, "Import at most 50 tables at a time.")
+    return information.import_datasets(s, platform=body.platform, owner=body.owner, tags=body.tags,
+                                       layer=body.layer, tables=tables, by=body.by)
+
+
 # --- Approvals ------------------------------------------------------------------------
 
 @app.get("/api/actions", tags=["Approvals"])
@@ -368,7 +440,7 @@ def get_governance(s: Session = Depends(get_session), who: str = Depends(visitor
             "not_used_for": ["Writing SQL, PySpark or dbt (a deterministic compiler does)",
                              "Calculating any figure (the sandbox executes the pipeline)",
                              "Deploying, or approving its own answer or any deployment",
-                             "Changing the catalog or running arbitrary queries"],
+                             "Changing the catalog, or running queries outside the read-only sandbox"],
             "tools": [t["name"] for t in agent.TOOLS],
             "tool_permissions": "Read the catalog; create and test DRAFT pipelines in the sandbox; queue a "
                                 "deployment request that only a named human can approve.",

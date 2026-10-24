@@ -123,3 +123,40 @@ def runs(s: Session, pipeline_id: int | None = None, limit: int = 50) -> list[di
              "status": r.status, "rows_written": r.rows_written, "duration_ms": r.duration_ms,
              "log": r.log, "approved_by": r.approved_by, "at": r.at.isoformat() if r.at else None}
             for r in q.order_by(RunRow.id.desc()).limit(limit)]
+
+
+def import_datasets(s: Session, *, platform: str, owner: str, tags: list[str], layer: str,
+                    tables: list[dict], by: str = "") -> dict:
+    """Onboard tables from another company's schema export. PII is tagged automatically from column
+    names (a safe default: over-tagging blocks, under-tagging leaks); review it in Find data."""
+    from . import actions, migration
+    from .spec import _slug
+    created, skipped = [], []
+    for t in tables:
+        tid = _slug(t.get("id") or t.get("table") or "")
+        if s.get(DatasetRow, tid) is not None:
+            skipped.append({"id": tid, "reason": "already in the catalog"})
+            continue
+        cols, pii = [], []
+        for c in t.get("columns", []):
+            name = _slug(c["name"])
+            cls = c.get("classification") or migration.suggest_classification(name)
+            if cls == "PII":
+                pii.append(name)
+            cols.append({"name": name, "type": migration.map_type(c.get("type", "")),
+                         "description": c.get("description") or f"Imported ({c.get('type', 'unknown type')})",
+                         **({"classification": cls} if cls else {})})
+        if not cols:
+            skipped.append({"id": tid, "reason": "no columns"})
+            continue
+        ds = DatasetRow(id=tid, friendly_name=t.get("friendly_name") or tid.replace("_", " ").title(),
+                        description=t.get("description") or f"Imported from a schema export ({len(cols)} columns).",
+                        layer=layer, platform=platform, owner=owner or "Unassigned",
+                        tags=sorted(set(tags) | ({"PII"} if pii else set())), columns=cols, relationships=[],
+                        last_loaded=None, refresh="daily", origin="seed", rows=list(t.get("rows") or []))
+        s.add(ds)
+        created.append({"id": tid, "columns": len(cols), "pii_columns": pii})
+    actions.audit(s, by, "CATALOG_IMPORT", {"created": [c["id"] for c in created], "skipped": skipped})
+    s.commit()
+    return {"created": created, "skipped": skipped,
+            "note": "PII was tagged from column names. Check it in Find data; no sample rows were loaded."}

@@ -121,8 +121,43 @@ def generate_rows() -> dict[str, list[dict]]:
             "channel": rng.choice(["chat", "email", "phone"]),
         })
 
+
+    # --- Summit Trail Co. (acquired, on Databricks) -------------------------------------------
+    r2 = random.Random(7)
+    codes = ["NO", "SO", "EA", "WE"]
+    summit_customers, crosswalk = [], []
+    for i in range(101, 131):
+        first, last = _FIRST[(i * 7) % len(_FIRST)], _LAST[(i * 5) % len(_LAST)]
+        summit_customers.append({
+            "cust_no": f"SC-{i}",
+            "customer_name": f"{first} {last}",
+            "email_addr": f"{first.lower()}{i}@summit-example.com",
+            "territory": "INTL" if i in (117, 126) else codes[r2.randrange(4)],
+            "since": (date(2023, 3, 1) + timedelta(days=r2.randrange(900))).isoformat(),
+        })
+        # 8 Summit customers are already Lakeside customers; the rest get new Lakeside IDs.
+        crosswalk.append({"legacy_system": "summit", "legacy_id": f"SC-{i}",
+                          "customer_id": f"C-{(i - 100) * 4:03d}" if i <= 108 else f"C-{100 + i:03d}"})
+    status_codes = ["Closed"] * 8 + ["Returned", "Void"]
+    summit_orders = []
+    for i in range(150):
+        cust = "SC-131" if i in (12, 77, 140) else f"SC-{r2.randrange(101, 131)}"   # not in the crosswalk
+        prod = f"P-{r2.randrange(1, 13):03d}"
+        qty = r2.choice([1, 1, 2, 2, 3])
+        summit_orders.append({
+            "ord_no": f"ST-{5001 + i}",
+            "cust_no": cust,
+            "item_code": prod,
+            "ord_date": (date(2026, 6, 1) + timedelta(days=r2.randrange(130))).isoformat(),
+            "order_status": r2.choice(status_codes),
+            "qty": qty,
+            "total_usd": "N/A" if i in (33, 98) else f"{qty * price[prod]:.2f}",
+        })
+
     return {"customers": customers, "products": products, "products_current": products_current,
-            "orders": orders, "web_events": events, "support_tickets": tickets}
+            "orders": orders, "web_events": events, "support_tickets": tickets,
+            "summit_orders": summit_orders, "summit_customers": summit_customers,
+            "customer_crosswalk": crosswalk}
 
 
 def catalog_entries() -> list[dict]:
@@ -210,16 +245,59 @@ def catalog_entries() -> list[dict]:
                   accepted_values=["chat", "email", "phone"]),
          ],
          "relationships": [{"column": "customer_id", "references": "customers.customer_id"}]},
+        {"id": "summit_orders", "friendly_name": "Summit Orders", "layer": "bronze", "platform": "databricks",
+         "owner": "Summit Trail Co. (acquired) · Finance IT", "tags": ["Acquired", "Confidential"],
+         "refresh": "daily", "last_loaded": asof,
+         "description": ("Orders from Summit Trail Co., acquired in 2026. Their own column names and status codes; "
+                         "dates and totals are stored as text."),
+         "columns": [
+             _col("ord_no", "string", "Summit order number"),
+             _col("cust_no", "string", "Summit customer number (map through the Customer ID crosswalk)"),
+             _col("item_code", "string", "Product code (same codes as Lakeside)"),
+             _col("ord_date", "string", "Order date, stored as text (YYYY-MM-DD)"),
+             _col("order_status", "string", "Summit status code", accepted_values=["Closed", "Returned", "Void"]),
+             _col("qty", "integer", "Units"),
+             _col("total_usd", "string", "Order value in US dollars, stored as text", classification="Confidential"),
+         ],
+         "relationships": [{"column": "cust_no", "references": "summit_customers.cust_no"}]},
+        {"id": "summit_customers", "friendly_name": "Summit Customers", "layer": "bronze", "platform": "databricks",
+         "owner": "Summit Trail Co. (acquired) · CRM", "tags": ["Acquired", "PII"], "refresh": "daily",
+         "last_loaded": asof,
+         "description": "Summit Trail Co. customer accounts. Territory codes differ from Lakeside regions.",
+         "columns": [
+             _col("cust_no", "string", "Summit customer number"),
+             _col("customer_name", "string", "Customer's name", classification="PII"),
+             _col("email_addr", "string", "Customer's email address", classification="PII"),
+             _col("territory", "string", "Summit territory code", accepted_values=["NO", "SO", "EA", "WE", "INTL"]),
+             _col("since", "string", "Account opened, stored as text (YYYY-MM-DD)"),
+         ],
+         "relationships": []},
+        {"id": "customer_crosswalk", "friendly_name": "Customer ID crosswalk", "layer": "silver",
+         "platform": "snowflake", "owner": "Master Data Management", "tags": ["Certified", "Internal"],
+         "refresh": "daily", "last_loaded": asof,
+         "description": ("Maps acquired companies' customer numbers to Lakeside customer IDs. One row per "
+                         "legacy ID; customers who already shopped at Lakeside keep their existing ID."),
+         "columns": [
+             _col("legacy_system", "string", "Which company the legacy ID came from", accepted_values=["summit"]),
+             _col("legacy_id", "string", "The acquired company's customer number"),
+             _col("customer_id", "string", "The Lakeside customer ID"),
+         ],
+         "relationships": []},
     ]
 
 
 def seed(s: Session) -> None:
     """Load the catalog and sample rows once. Safe to call on every start."""
-    if s.query(DatasetRow).filter(DatasetRow.origin == "seed").first():
+    have = {d.id for d in s.query(DatasetRow.id)}
+    entries = [e for e in catalog_entries() if e["id"] not in have]
+    if not entries:
         return
     rows = generate_rows()
-    for e in catalog_entries():
+    for e in entries:
         s.add(DatasetRow(**e, origin="seed", rows=rows[e["id"]]))
+    if "products_current" in have:
+        s.commit()
+        return
     s.add(LineageRow(source="products", target="products_current", pipeline_id=None,
                      column_map=[{"output": c, "from": f"products.{c}", "transform": "latest row per product_id"}
                                  for c in ("product_id", "product_name", "category", "unit_price")]))
@@ -285,3 +363,86 @@ EXAMPLES = [
               "target": {"name": "weekly_funnel", "layer": "gold"},
               "schedule": "daily"}},
 ]
+
+
+# --- Migration mode: conform examples and a legacy report ----------------------------------------
+
+_ORDERS_MODEL = [
+    {"name": "order_id", "type": "string", "key": True, "required": True, "description": "Unique order number"},
+    {"name": "customer_id", "type": "string", "description": "Lakeside customer ID"},
+    {"name": "product_id", "type": "string", "description": "Product code"},
+    {"name": "order_date", "type": "date", "required": True, "description": "Day the order was placed"},
+    {"name": "status", "type": "string", "required": True, "accepted_values": ["completed", "returned", "cancelled"],
+     "description": "Standard Lakeside order status"},
+    {"name": "quantity", "type": "integer", "description": "Units"},
+    {"name": "amount", "type": "decimal", "description": "Order value in US dollars"},
+]
+
+CONFORM_EXAMPLES = [
+    {"id": "combine-orders", "title": "Combine Summit orders with Lakeside orders",
+     "ask": ("We acquired Summit Trail Co. Combine their orders with ours on Snowflake, in our standard order "
+             "format, using the customer ID crosswalk."),
+     "spec": {"kind": "conform", "name": "All orders (Lakeside + Summit)", "platform": "snowflake",
+              "model": _ORDERS_MODEL,
+              "sources": [
+                  {"dataset": "orders", "label": "lakeside", "mappings": [
+                      {"target": "order_id", "source": "order_id"}, {"target": "customer_id", "source": "customer_id"},
+                      {"target": "product_id", "source": "product_id"}, {"target": "order_date", "source": "order_date"},
+                      {"target": "status", "source": "status"}, {"target": "quantity", "source": "quantity"},
+                      {"target": "amount", "source": "amount"}]},
+                  {"dataset": "summit_orders", "label": "summit", "mappings": [
+                      {"target": "order_id", "source": "ord_no"},
+                      {"target": "customer_id", "source": "cust_no",
+                       "lookup": {"dataset": "customer_crosswalk", "key": "legacy_id", "value": "customer_id"}},
+                      {"target": "product_id", "source": "item_code"},
+                      {"target": "order_date", "source": "ord_date"},
+                      {"target": "status", "source": "order_status",
+                       "value_map": {"Closed": "completed", "Returned": "returned", "Void": "cancelled"}},
+                      {"target": "quantity", "source": "qty"},
+                      {"target": "amount", "source": "total_usd", "cast": "decimal"}]}],
+              "target": {"name": "orders_combined", "layer": "silver"}, "schedule": "daily"}},
+    {"id": "combine-customers", "title": "Combine the two customer lists",
+     "ask": "Merge Summit's customers into our customer table on Snowflake without duplicating shared customers.",
+     "spec": {"kind": "conform", "name": "All customers (Lakeside + Summit)", "platform": "snowflake",
+              "model": [
+                  {"name": "customer_id", "type": "string", "key": True, "required": True},
+                  {"name": "full_name", "type": "string"},
+                  {"name": "email", "type": "string"},
+                  {"name": "region", "type": "string", "accepted_values": ["North", "South", "East", "West"]},
+                  {"name": "segment", "type": "string", "accepted_values": ["Consumer", "Business"]},
+                  {"name": "signup_date", "type": "date"}],
+              "sources": [
+                  {"dataset": "customers", "label": "lakeside", "mappings": [
+                      {"target": "customer_id", "source": "customer_id"}, {"target": "full_name", "source": "full_name"},
+                      {"target": "email", "source": "email"}, {"target": "region", "source": "region"},
+                      {"target": "segment", "source": "segment"}, {"target": "signup_date", "source": "signup_date"}]},
+                  {"dataset": "summit_customers", "label": "summit", "mappings": [
+                      {"target": "customer_id", "source": "cust_no",
+                       "lookup": {"dataset": "customer_crosswalk", "key": "legacy_id", "value": "customer_id"}},
+                      {"target": "full_name", "source": "customer_name"},
+                      {"target": "email", "source": "email_addr"},
+                      {"target": "region", "source": "territory",
+                       "value_map": {"NO": "North", "SO": "South", "EA": "East", "WE": "West"}},
+                      {"target": "segment", "default": "Consumer"},
+                      {"target": "signup_date", "source": "since", "cast": "date"}]}],
+              "target": {"name": "customers_combined", "layer": "silver"}, "schedule": "daily"}},
+]
+
+LEGACY_EXAMPLE = {
+    "id": "summit-territory-report",
+    "title": "Summit's old 'units by territory' report",
+    "sql": ("-- Summit Trail Co. legacy report (Databricks SQL)\n"
+            "SELECT c.territory, SUM(o.qty) AS units, COUNT(*) AS orders\n"
+            "FROM summit_lakehouse.sales.summit_orders AS o\n"
+            "JOIN summit_lakehouse.sales.summit_customers AS c ON o.cust_no = c.cust_no\n"
+            "WHERE o.order_status = 'Closed'\n"
+            "GROUP BY c.territory"),
+    "spec": {"name": "Summit units by territory", "platform": "databricks", "source": "summit_orders",
+             "joins": [{"dataset": "summit_customers", "left": "summit_orders.cust_no",
+                        "right": "summit_customers.cust_no", "how": "inner"}],
+             "filters": [{"column": "summit_orders.order_status", "op": "=", "value": "Closed"}],
+             "group_by": [{"column": "summit_customers.territory"}],
+             "measures": [{"agg": "sum", "column": "summit_orders.qty", "name": "units"},
+                          {"agg": "count", "column": None, "name": "orders"}],
+             "target": {"name": "summit_units_by_territory", "layer": "gold"}, "schedule": "daily"},
+}

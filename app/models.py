@@ -94,6 +94,19 @@ class RunRow(Base):
     at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
 
 
+class LegacyCompareRow(Base):
+    """Legacy SQL vs pipeline output on the same sample data, for one exact spec version."""
+    __tablename__ = "legacy_comparisons"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    pipeline_id: Mapped[int] = mapped_column(Integer, index=True)
+    spec_hash: Mapped[str] = mapped_column(String(16))
+    legacy_sql: Mapped[str] = mapped_column(Text)
+    status: Mapped[str] = mapped_column(String(24))      # EQUIVALENT | DIFFERENT | COULD_NOT_RUN
+    result: Mapped[dict] = mapped_column(JSON)
+    by: Mapped[str] = mapped_column(String(120), default="")
+    at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+
+
 # --- Governance ----------------------------------------------------------------------
 
 class PendingActionRow(Base):

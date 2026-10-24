@@ -51,6 +51,60 @@ The demo data has these problems planted on purpose, so every example shows some
 
 ---
 
+## Migration mode: acquisitions and platform moves
+
+The hard part of a migration isn't copying tables. It's proving nothing was lost, translated wrongly or counted twice. The **Migrate** tab walks through four stages, each backed by the same sandbox and approval gates.
+
+| Stage | What you do | What the agent proves |
+|---|---|---|
+| **1 · Onboard** | Import the other company's tables from a schema export (`table,column,type` lines) | Columns typed for your platforms; names like `email`, `phone`, `customer_name` tagged **PII** automatically |
+| **2 · Conform** | Map each source onto **your** standard model: rename columns, convert text dates and amounts, translate their codes (`Closed → completed`), swap their IDs for yours through a crosswalk | Every source row arrives **exactly once**; totals preserved **to the cent**; unreadable values and crosswalk misses **counted with examples**; keys don't collide between companies; required fields filled; values stay on your list |
+| **3 · Prove** | Paste their legacy report SQL | The old query and the new pipeline run on the same sample data, and every row is compared. The result (equivalent, or exactly which rows differ) is stored with the pipeline and shown to the approver |
+| **4 · Move** | Re-platform: every pipeline recompiles for Databricks, Snowflake or Fabric as a new draft | A plan of new table names and cross-platform reads, then **reconcile** old vs new: row counts, keys on each side, per-key totals |
+
+A conform pipeline is a spec like any other (`"kind": "conform"`):
+
+```json
+{
+  "kind": "conform", "name": "All orders (Lakeside + Summit)", "platform": "snowflake",
+  "model": [{"name": "order_id", "type": "string", "key": true, "required": true},
+            {"name": "status", "type": "string", "required": true,
+             "accepted_values": ["completed", "returned", "cancelled"]},
+            {"name": "amount", "type": "decimal"}],
+  "sources": [
+    {"dataset": "orders", "label": "lakeside",
+     "mappings": [{"target": "order_id", "source": "order_id"}, {"target": "status", "source": "status"},
+                  {"target": "amount", "source": "amount"}]},
+    {"dataset": "summit_orders", "label": "summit",
+     "mappings": [{"target": "order_id", "source": "ord_no"},
+                  {"target": "status", "source": "order_status",
+                   "value_map": {"Closed": "completed", "Returned": "returned", "Void": "cancelled"}},
+                  {"target": "amount", "source": "total_usd", "cast": "decimal"}]}],
+  "overlap": "keep_all",
+  "target": {"name": "orders_combined", "layer": "silver"}
+}
+```
+
+It compiles to a `UNION ALL` with a `source_system` column for each platform, using each one's safe conversion (`TRY_CAST`, `dbt.safe_cast`). Alongside the code it produces PySpark, a dbt model and tests, and a **mapping document** (CSV) for data owners to sign off. Lookups compile to a left join on the crosswalk. `"overlap": "prefer_first"` keeps the primary company's record when the same key exists in both.
+
+The legacy comparison runs in a read-only sandbox. Only a single `SELECT` is accepted, writes and system tables are refused by the database authorizer, and table names from any platform (`db.schema.table`, `[dbo].[t]`, backticks) are mapped to catalog datasets.
+
+**Demo:** the fictional **Summit Trail Co.**, acquired, runs on Databricks with its own column names and status codes, dates and totals stored as text (two totals read `N/A`), and an ID crosswalk. Eight Summit customers already shop at Lakeside, and some Summit orders belong to customers missing from the crosswalk. The examples on the Migrate tab find all of it.
+
+| Migration API | Endpoint |
+|---|---|
+| Examples (conform specs and a legacy report) | `GET /api/migration/examples` |
+| Compare a legacy SELECT with a pipeline | `POST /api/pipelines/{id}/compare-legacy` |
+| Reconcile two tables | `POST /api/reconcile` |
+| Re-platform plan / open a pipeline as a draft on another platform | `GET /api/migration/replatform?platform=`, `POST /api/pipelines/{id}/replatform` |
+| Import tables from a schema export, with PII tagging | `POST /api/catalog/import` |
+
+Claude has matching tools (`draft_conform_pipeline`, `compare_with_legacy`, `reconcile_tables`, `replatform_plan`). It still can't deploy, approve or change the catalog, and it may not claim equivalence without a comparison result.
+
+**Not in v1:** copying the data itself between platforms (that's a replication tool's job: Fivetran, Data Factory, data shares, Lakehouse Federation; the agent sits on top), fuzzy matching of records without a crosswalk, and running platform-specific legacy SQL functions in the sandbox.
+
+---
+
 ## The governance I applied
 
 | Choice | What it means in this build |
@@ -176,5 +230,8 @@ Or with PostgreSQL: `docker compose up --build`.
 | Products (current) | Databricks | Certified, one row per product |
 | Website & App Events | Microsoft Fabric | Last loaded 6 days before the as-of date |
 | Support Tickets | Microsoft Fabric | Satisfaction scores, some blank |
+| Summit Orders | Databricks | **Acquired.** Their column names and status codes; dates and totals stored as text, two totals read `N/A` |
+| Summit Customers | Databricks | **Acquired.** Name and email tagged **PII**; territory codes instead of regions, two `INTL` |
+| Customer ID crosswalk | Snowflake | Master data: Summit customer number → Lakeside customer ID (8 shared customers) |
 
 No real people, companies or figures.

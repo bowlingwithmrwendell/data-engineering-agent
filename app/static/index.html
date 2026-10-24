@@ -141,6 +141,15 @@
   .layers b{display:block;color:var(--navy);font-size:.88rem}
   .toast{position:fixed;bottom:18px;left:50%;transform:translateX(-50%);background:var(--navy);color:#fff;padding:10px 16px;border-radius:10px;font-size:.9rem;box-shadow:0 6px 20px rgba(0,0,0,.2);z-index:9;max-width:90vw}
   .rv{border:1px solid var(--line);border-radius:12px;padding:14px 16px;margin-bottom:12px;background:#fff}
+  .map td{min-width:180px}
+  .map td:first-child{min-width:150px}
+  .map select,.map input{width:100%;margin-top:3px;font-size:.84rem;padding:6px 8px}
+  .map .sub{font-size:.76rem;color:var(--muted);margin-top:3px}
+  .stage{display:grid;gap:10px;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));margin-top:10px}
+  .stage div{border:1px solid var(--line);border-radius:10px;padding:10px 12px;background:#fbfcfd;font-size:.86rem}
+  .stage b{display:block;color:var(--navy)}
+  .eq{border-radius:10px;padding:12px 14px;margin-top:10px}
+  .eq.EQUIVALENT,.eq.MATCH{background:var(--green-bg)} .eq.DIFFERENT,.eq.DIFFERENCES{background:var(--red-bg)} .eq.COULD_NOT_RUN{background:var(--amber-bg)}
   .spinner{display:inline-block;width:14px;height:14px;border:2px solid #c9d3e0;border-top-color:var(--navy);border-radius:50%;animation:spin .8s linear infinite;vertical-align:-2px}
   @keyframes spin{to{transform:rotate(360deg)}}
 </style>
@@ -166,6 +175,7 @@
   <button data-tab="ask">Ask in plain English</button>
   <button data-tab="build">Build step by step</button>
   <button data-tab="data">Find data</button>
+  <button data-tab="migrate">Migrate</button>
   <button data-tab="pipelines">My pipelines</button>
   <button data-tab="approvals">Approvals <span id="pendingCount" class="pill" style="margin:0 0 0 4px">0</span></button>
   <a href="/governance">Governance ↗</a>
@@ -176,6 +186,7 @@
   <section id="ask" class="hidden"></section>
   <section id="build" class="hidden"></section>
   <section id="data" class="hidden"></section>
+  <section id="migrate" class="hidden"></section>
   <section id="pipelines" class="hidden"></section>
   <section id="approvals" class="hidden"></section>
 </main>
@@ -256,7 +267,7 @@ $("#tabs").addEventListener("click", e => { const b = e.target.closest("button")
 function show(tab){
   $$("#tabs button").forEach(b => b.classList.toggle("active", b.dataset.tab === tab));
   $$("main section").forEach(s => s.classList.toggle("hidden", s.id !== tab));
-  if(!loaded[tab] || ["pipelines","approvals"].includes(tab)){ loaded[tab] = true; loaders[tab](); }
+  if(!loaded[tab] || ["pipelines","approvals","migrate"].includes(tab)){ loaded[tab] = true; loaders[tab](); }
   window.scrollTo({top:0, behavior:"smooth"});
 }
 const dev = $("#devToggle");
@@ -282,6 +293,8 @@ const loaders = {
           <div class="muted">Pick your data, choose what to total, and see the result. No AI needed.</div></button>
         <button class="tile" data-go="data"><div class="big">🔎</div><h3>Find data</h3>
           <div class="muted">Browse what exists, who owns it, how fresh it is, and where it came from.</div></button>
+        <button class="tile" data-go="migrate"><div class="big">🔀</div><h3>Migrate</h3>
+          <div class="muted">Bring an acquired company's data onto yours, prove the old reports still match, or move platforms.</div></button>
       </div>
       <div class="card" style="margin-top:16px">
         <h2>Try an example</h2>
@@ -353,7 +366,7 @@ const loaders = {
       <p class="muted">Every pipeline you or the agent created. Open one to test it, fix it or request deployment.</p>
       ${table([
         ["#", p => esc(p.id)],
-        ["Name", p => `<b>${esc(p.name)}</b><div class="muted">${esc(p.target)}</div>`],
+        ["Name", p => `<b>${esc(p.name)}</b>${p.kind === "conform" ? ` <span class="pill">migration</span>` : ""}<div class="muted">${esc(p.target)}</div>`],
         ["Platform", p => esc(p.platform_name)],
         ["Status", p => status(p.status)],
         ["Last test", p => !p.last_test ? `<span class="muted">not tested</span>` : esc({PASSED:"Passed",PASSED_WITH_WARNINGS:"Passed with warnings",FAILED:"Failed"}[p.last_test.status]) + (p.last_test.current ? "" : ` <span class="muted">(older version)</span>`)],
@@ -446,6 +459,13 @@ function newSpec(src){
 async function openBuilder(spec, silent, src){
   if(!Object.keys(CAT).length) await loadCatalog();
   spec = spec || newSpec(src);
+  if(spec.kind === "conform"){
+    spec.masks = spec.masks || []; spec.overlap = spec.overlap || "keep_all"; spec.source_column = spec.source_column || "source_system";
+    spec.target = {layer:"silver", materialization:"table", ...(spec.target || {})};
+    B = {spec, conform:true, pipeline:null, targetTouched:true, preview:null};
+    if(!silent) show("build");
+    return renderBuilder();
+  }
   for(const k of ["joins","filters","columns","group_by","measures","masks"]) spec[k] = spec[k] || [];
   spec.target = {layer:"gold", materialization:"table", ...(spec.target || {})};
   B = {spec, mode: spec.measures.length || !spec.columns.length ? "totals" : "list", pipeline:null, targetTouched: !!spec.target.name, preview:null};
@@ -465,6 +485,7 @@ function measureAutoName(m){
 }
 
 function renderBuilder(){
+  if(B.conform) return renderConform();
   const s = B.spec, isTotals = B.mode === "totals";
   const dsOpts = Object.values(CAT).map(d => ({value:d.id, label:`${d.friendly_name} — ${d.platform_name}${d.tags.includes("Certified") ? " ✓" : ""}`}));
   const inScope = scopeIds(s);
@@ -718,6 +739,7 @@ function renderResults(){
     ${fails.length ? `<h3>Fix before deploying</h3>${fails.map(chk).join("")}` : ""}
     ${warns.length ? `<h3>Good to know</h3>${warns.map(chk).join("")}` : ""}
     <details style="margin-top:10px"><summary class="muted">${passes.length} checks passed</summary>${passes.map(chk).join("")}</details>
+    ${p.legacy_comparison ? `<h3>Compared with the legacy query</h3>${eqCard(p.legacy_comparison)}${p.legacy_comparison.current ? "" : `<p class="muted">⚠ Compared against an older version of this pipeline.</p>`}` : ""}
     <h3>Result preview</h3>${rowsTable(v.preview)}
     ${v.preview.length < v.row_count ? `<p class="muted">Showing ${v.preview.length} of ${v.row_count} rows.</p>` : ""}
     <h3>Deploy</h3>
@@ -753,6 +775,218 @@ async function requestDeploy(){
   }catch(e){ toast(e.message); }
 }
 
+/* ---------------- Migration: conform builder ---------------- */
+const vmText = vm => vm ? Object.entries(vm).map(([k,v]) => `${k}=${v}`).join(", ") : "";
+const vmParse = t => { const o = {}; String(t||"").split(",").map(x => x.trim()).filter(Boolean).forEach(x => { const [k, ...v] = x.split("="); if(k && v.length) o[k.trim()] = v.join("=").trim(); }); return Object.keys(o).length ? o : null; };
+const TYPES = ["string","integer","decimal","date","timestamp"];
+function mapping(src, target){ let m = src.mappings.find(x => x.target === target); if(!m){ m = {target}; src.mappings.push(m); } return m; }
+
+function renderConform(){
+  const s = B.spec;
+  const cols = d => CAT[d]?.columns || [];
+  const xws = Object.values(CAT).filter(d => /crosswalk/i.test(d.id + d.friendly_name));
+  const used = s.sources.map(x => x.dataset);
+  const cell = (si, mc) => {
+    const src = s.sources[si], m = src.mappings.find(x => x.target === mc.name) || {};
+    const isConst = !m.source && m.default !== undefined && m.default !== null;
+    const col = cols(src.dataset).find(c => c.name === m.source);
+    const key = `${si}|${esc(mc.name)}`;
+    return `<td><select data-msrc="${key}" aria-label="${esc(src.label)} column for ${esc(mc.name)}">
+        <option value="">(leave blank)</option>
+        ${cols(src.dataset).map(c => `<option value="c:${esc(c.name)}"${m.source === c.name ? " selected" : ""}>${esc(words(c.name))} · ${esc(c.type)}${c.classification === "PII" ? " · PII" : ""}</option>`).join("")}
+        <option value="k:"${isConst ? " selected" : ""}>a fixed value…</option></select>
+      ${isConst ? `<input type="text" data-mconst="${key}" value="${esc(m.default)}" aria-label="Fixed value">` : ""}
+      ${m.source && !(m.cast || m.value_map || m.lookup || (col && col.type !== mc.type) || m.source !== mc.name || (B.open || {})[key]) ? `<div class="sub">✓ same as yours <button class="btn link" data-mopen="${key}">options</button></div>` : ""}
+      ${m.source && (m.cast || m.value_map || m.lookup || (col && col.type !== mc.type) || m.source !== mc.name || (B.open || {})[key]) ? `<div class="sub">
+        <select data-mcast="${key}" aria-label="Convert">${opts([{value:"", label: col ? `keep as ${col.type}` : "keep type"}, ...TYPES.map(t => ({value:t, label:"convert to " + t}))], m.cast || "")}</select>
+        ${col && col.type === "string" ? `<input type="text" data-mvm="${key}" value="${esc(vmText(m.value_map))}" placeholder="translate codes: A=Alpha, B=Beta" aria-label="Translate values">` : ""}
+        ${m.lookup ? `<div class="sub">🔁 looked up in ${esc(CAT[m.lookup.dataset]?.friendly_name || m.lookup.dataset)} (${esc(m.lookup.key)} → ${esc(m.lookup.value)}) <button class="btn link" data-mnolk="${key}">remove</button></div>`
+          : col && col.type === "string" && xws.length ? `<select data-mlk="${key}" aria-label="ID lookup"><option value="">no ID lookup</option>${xws.map(x => `<option value="${esc(x.id)}">swap IDs using ${esc(x.friendly_name)}</option>`).join("")}</select>` : ""}
+      </div>` : ""}</td>`;
+  };
+  $("#build").innerHTML = `
+  <div class="builder">
+   <div>
+    <div class="card" style="margin-bottom:12px"><span class="pill">Migration</span> <b>Combine data into one standard table</b>
+      <p class="muted" style="margin:6px 0 0">Map each source onto your model. The sandbox then reconciles: every row arrives once, totals are preserved, and anything that doesn't fit is counted and explained.</p></div>
+
+    <div class="step"><h3><span class="n">1</span>Your standard model</h3>
+      <p class="help">The columns every source must fit into. <span class="devonly" style="display:inline">Edit it in the spec JSON.</span></p>
+      <div class="body">${table([["Column", c => `<b>${esc(words(c.name))}</b> <span class="devonly muted" style="display:inline">${esc(c.name)}</span>`], ["Type", c => esc(c.type)],
+        ["Rules", c => [c.key ? "unique key" : "", c.required ? "required" : "", c.accepted_values ? "only: " + c.accepted_values.join(", ") : ""].filter(Boolean).map(esc).join(" · ") || `<span class="muted">—</span>`]], s.model)}
+        <div class="muted" style="margin-top:6px">Plus <b>${esc(words(s.source_column))}</b>, which records which company each row came from.</div></div></div>
+
+    <div class="step"><h3><span class="n">2</span>Sources</h3>
+      <p class="help">The datasets to combine. The first one is treated as the primary system.</p>
+      <div class="body">${s.sources.map((x, i) => `<div class="line"><b>${esc(CAT[x.dataset]?.friendly_name || x.dataset)}</b>
+          <span class="pill platpill">${esc(CAT[x.dataset]?.platform_name || "")}</span>${tagPills((CAT[x.dataset]?.tags || []).filter(t => t === "Acquired"))}
+          <span class="word">labelled</span><input type="text" data-slabel="${i}" value="${esc(x.label)}" style="width:110px" aria-label="Source label">
+          ${s.sources.length > 1 ? `<button class="x" data-sx="${i}" aria-label="Remove source">×</button>` : ""}</div>`).join("")}
+        <select id="addSource" aria-label="Add a source"><option value="">+ Add a source…</option>${opts(Object.values(CAT).filter(d => !used.includes(d.id)).map(d => ({value:d.id, label:`${d.friendly_name} — ${d.platform_name}${d.tags.includes("Acquired") ? " · acquired" : ""}`})), "")}</select></div></div>
+
+    <div class="step"><h3><span class="n">3</span>Map each source onto the model</h3>
+      <p class="help">For each of your columns, pick where it comes from. Convert text dates and amounts, translate their codes to yours, and swap their IDs for yours through a crosswalk.</p>
+      <div class="table-wrap map"><table><thead><tr><th>Your column</th>${s.sources.map(x => `<th>${esc(CAT[x.dataset]?.friendly_name || x.dataset)}</th>`).join("")}</tr></thead>
+        <tbody>${s.model.map(mc => `<tr><td><b>${esc(words(mc.name))}</b><div class="sub">${esc(mc.type)}${mc.key ? " · key" : ""}${mc.required ? " · required" : ""}</div></td>${s.sources.map((_, i) => cell(i, mc)).join("")}</tr>`).join("")}</tbody></table></div></div>
+
+    <div class="step"><h3><span class="n">4</span>When the same record is in both</h3>
+      <p class="help">Acquired customers often already exist in your systems under the same ID.</p>
+      <div class="body"><div class="seg" role="group" aria-label="Overlap rule">
+        <button data-ov="keep_all" class="${s.overlap !== "prefer_first" ? "on" : ""}">Keep both copies</button>
+        <button data-ov="prefer_first" class="${s.overlap === "prefer_first" ? "on" : ""}">Keep the ${esc(CAT[s.sources[0]?.dataset]?.friendly_name || "first")} record</button></div></div></div>
+
+    <div class="step"><h3><span class="n">5</span>Where should it live?</h3>
+      <div class="body">
+        <div class="plats">${["databricks","snowflake","fabric"].map(p => `<button class="plat${s.platform===p?" on":""}" data-plat="${p}"><b>${PLAT[p]}</b></button>`).join("")}</div>
+        <div class="row" style="margin-top:6px;align-items:flex-end">
+          <div><label class="f" for="pname">Name it</label><input type="text" id="pname" value="${esc(s.name)}" style="width:260px"></div>
+          <div><label class="f" for="tname">Table name</label><input type="text" id="tname" value="${esc(s.target.name)}" style="width:220px"></div>
+          <div><label class="f" for="layer">Quality level</label><select id="layer">${opts([{value:"silver",label:"Silver — cleaned, for analysts"},{value:"gold",label:"Gold — business-ready"}], s.target.layer)}</select></div>
+          <div><label class="f" for="sched">Refresh</label><select id="sched">${opts([["daily","Every day"],["hourly","Every hour"],["weekly","Every week"],["manual","Only when asked"]].map(([v,l])=>({value:v,label:l})), s.schedule)}</select></div>
+        </div></div></div>
+
+    <div class="row"><button class="btn gold" id="testBtn">Test and reconcile in the sandbox</button>
+      <span class="muted">Runs the real code on both companies' sample data. Nothing is deployed.</span></div>
+    <div id="results" style="margin-top:16px"></div>
+   </div>
+   <aside class="side" id="side"></aside>
+  </div>`;
+  wireConform(); renderSide(); preview();
+  if(B.pipeline) renderResults();
+}
+
+function wireConform(){
+  const s = B.spec, root = $("#build"), on = (sel, fn) => $$(sel, root).forEach(fn);
+  const at = k => { const [i, t] = k.split("|"); return mapping(s.sources[+i], t); };
+  on("[data-msrc]", el => el.onchange = () => { const m = at(el.dataset.msrc);
+    delete m.source; delete m.default; delete m.cast; delete m.value_map; delete m.lookup;
+    if(el.value.startsWith("c:")) m.source = el.value.slice(2); else if(el.value === "k:") m.default = "";
+    changed(); });
+  on("[data-mconst]", el => el.onchange = () => { at(el.dataset.mconst).default = el.value; changed(); });
+  on("[data-mcast]", el => el.onchange = () => { const m = at(el.dataset.mcast); if(el.value) m.cast = el.value; else delete m.cast; changed(); });
+  on("[data-mvm]", el => el.onchange = () => { const m = at(el.dataset.mvm); const vm = vmParse(el.value); if(vm) m.value_map = vm; else delete m.value_map; changed(); });
+  on("[data-mopen]", b => b.onclick = () => { B.open = {...(B.open || {}), [b.dataset.mopen]: true}; renderConform(); });
+  on("[data-mnolk]", b => b.onclick = () => { delete at(b.dataset.mnolk).lookup; changed(); });
+  on("[data-mlk]", el => el.onchange = () => { if(!el.value) return; const m = at(el.dataset.mlk), x = CAT[el.value], names = x.columns.map(c => c.name);
+    const tgt = el.dataset.mlk.split("|")[1];
+    m.lookup = {dataset:x.id, key: names.find(n => /legacy|source|old/.test(n)) || names[0], value: names.find(n => n === tgt) || names[names.length - 1]}; changed(); });
+  on("[data-slabel]", el => el.onchange = () => { s.sources[+el.dataset.slabel].label = slug(el.value).slice(0, 30); changed(); });
+  on("[data-sx]", b => b.onclick = () => { s.sources.splice(+b.dataset.sx, 1); changed(); });
+  const add = $("#addSource"); add.onchange = () => { const id = add.value; if(!id) return;
+    const names = CAT[id].columns.map(c => c.name);
+    let label = slug(id.split("_")[0]); while(s.sources.some(x => x.label === label)) label += "_2";
+    s.sources.push({dataset:id, label, mappings: s.model.filter(mc => names.includes(mc.name)).map(mc => ({target:mc.name, source:mc.name})), filters:[]}); changed(); };
+  on("[data-ov]", b => b.onclick = () => { s.overlap = b.dataset.ov; changed(); });
+  on("[data-plat]", b => b.onclick = () => { s.platform = b.dataset.plat; changed(); });
+  $("#pname").onchange = e => { s.name = e.target.value.trim(); changed(); };
+  $("#tname").onchange = e => { s.target.name = slug(e.target.value); changed(); };
+  $("#layer").onchange = e => { s.target.layer = e.target.value; changed(); };
+  $("#sched").onchange = e => { s.schedule = e.target.value; changed(); };
+  $("#testBtn").onclick = testPipeline;
+}
+
+/* ---------------- Migrate tab ---------------- */
+let MIG = null;
+function eqCard(r){
+  const cols = r.columns || [];
+  const rows = (list) => list && list.length ? `<div class="table-wrap"><table><thead><tr>${cols.map(c => `<th>${esc(words(c))}</th>`).join("")}</tr></thead><tbody>${list.map(x => `<tr>${x.map(v => `<td>${v === null ? `<span class="muted">blank</span>` : esc(fmt(v))}</td>`).join("")}</tr>`).join("")}</tbody></table></div>` : "";
+  return `<div class="eq ${esc(r.status)}"><b>${{EQUIVALENT:"✅",DIFFERENT:"❌",COULD_NOT_RUN:"⚠️"}[r.status] || ""} ${esc(r.headline)}</b>
+    ${r.message ? `<div>${esc(r.message)}</div>` : ""}
+    ${r.legacy_rows !== undefined && r.status !== "COULD_NOT_RUN" ? `<div class="muted">Legacy query: ${r.legacy_rows} rows · new pipeline: ${r.new_rows} rows · matching: ${r.matching_rows ?? 0}${r.matched ? " · compared " + esc(r.matched) : ""}</div>` : ""}
+    ${r.only_in_legacy && r.only_in_legacy.length ? `<h3>Only in the legacy result</h3>${rows(r.only_in_legacy)}` : ""}
+    ${r.only_in_new && r.only_in_new.length ? `<h3>Only in the new pipeline</h3>${rows(r.only_in_new)}` : ""}
+    ${r.explanation ? `<details class="how devonly"><summary>How this was compared</summary><pre>${esc(JSON.stringify(r.explanation, null, 2))}</pre></details>` : ""}</div>`;
+}
+function recCard(r){
+  return `<div class="eq ${esc(r.status)}"><b>${r.status === "MATCH" ? "✅" : "❌"} ${esc(r.headline)}</b>
+    ${table([["", x => esc(x[0])], [CAT[r.left]?.friendly_name || r.left, x => esc(fmt(x[1]))], [CAT[r.right]?.friendly_name || r.right, x => esc(fmt(x[2]))]],
+      [["Rows", r.rows.left, r.rows.right], ["Distinct keys", r.distinct_keys.left, r.distinct_keys.right],
+       ["Keys only on this side", r.only_in_left.count, r.only_in_right.count],
+       ...r.measures.map(m => [`Total ${words(m.measure)}`, m.left_total, m.right_total])])}
+    ${r.measures.filter(m => m.keys_with_different_values).map(m => `<div>${esc(words(m.measure))} differs for ${m.keys_with_different_values} key(s), e.g. ${esc(m.examples.join(", "))}</div>`).join("")}
+    ${r.only_in_left.count ? `<div class="muted">Only in ${esc(CAT[r.left]?.friendly_name)}: ${esc(r.only_in_left.examples.join(", "))}</div>` : ""}
+    ${r.only_in_right.count ? `<div class="muted">Only in ${esc(CAT[r.right]?.friendly_name)}: ${esc(r.only_in_right.examples.join(", "))}</div>` : ""}</div>`;
+}
+async function openDataset(id){ show("data"); for(let i = 0; i < 40 && !$("#dsDetail"); i++) await new Promise(r => setTimeout(r, 50)); showDataset(id); }
+
+loaders.migrate = async function(){
+  await loadCatalog();
+  MIG = MIG || await api("/api/migration/examples");
+  const pls = await api("/api/pipelines");
+  const acquired = Object.values(CAT).filter(d => d.tags.includes("Acquired") || /crosswalk/i.test(d.id));
+  const dsOpts = Object.values(CAT).map(d => ({value:d.id, label:d.friendly_name}));
+  const plOpts = pls.filter(p => p.kind !== "conform").map(p => ({value:p.id, label:`#${p.id} ${p.name}`}));
+  $("#migrate").innerHTML = `
+    <div class="card"><h2 style="font-size:1.3rem">Bring another company's data onto yours</h2>
+      <p class="lead">After an acquisition, or when moving to a new platform, the hard part isn't copying tables. It's proving nothing was lost, translated wrongly or counted twice. This walks you through it.</p>
+      <div class="stage"><div><b>1 · Onboard</b>Get their tables into the catalog, with owners and personal data tagged.</div>
+        <div><b>2 · Conform</b>Map their columns, codes and IDs onto your standard model.</div>
+        <div><b>3 · Prove</b>Show their old reports return the same answers from the new pipeline.</div>
+        <div><b>4 · Move</b>Re-platform pipelines and reconcile old tables against new.</div></div></div>
+
+    <div class="card"><h2>1 · Onboard their tables</h2>
+      <p class="muted" style="margin-top:0">Summit Trail Co. (fictional) was acquired. Its tables are already in the catalog:</p>
+      <div class="grid">${acquired.map(d => `<button class="tile" data-ods="${esc(d.id)}"><div class="row" style="justify-content:space-between"><span class="name">${esc(d.friendly_name)}</span><span class="pill platpill">${esc(d.platform_name)}</span></div><div class="muted">${esc(d.description)}</div><div>${tagPills(d.tags)}</div></button>`).join("")}</div>
+      <details style="margin-top:12px"><summary><b>Import more tables from a schema export</b></summary>
+        <p class="muted">Paste <code>table,column,type</code> lines (for example from <code>information_schema.columns</code>). Columns that look like personal information are tagged PII automatically.</p>
+        <textarea id="impCsv" placeholder="table,column,type&#10;summit_invoices,invoice_no,varchar(20)&#10;summit_invoices,billing_email,nvarchar(200)&#10;summit_invoices,amount,decimal(12,2)"></textarea>
+        <div class="row" style="margin-top:8px"><select id="impPlat" aria-label="Platform">${opts(["databricks","snowflake","fabric"].map(p => ({value:p, label:PLAT[p]})), "databricks")}</select>
+          <input type="text" id="impOwner" placeholder="Owner, e.g. Summit IT" aria-label="Owner"><button class="btn" id="impBtn">Import</button></div>
+        <div id="impOut"></div></details></div>
+
+    <div class="card"><h2>2 · Conform their data to yours</h2>
+      <p class="muted" style="margin-top:0">Pick one to open it in the mapping builder, then test it. The sandbox will show you what doesn't fit.</p>
+      <div class="grid">${MIG.conform.map(x => `<button class="tile" data-cex="${esc(x.id)}"><div class="name">${esc(x.title)}</div><div class="muted">“${esc(x.ask)}”</div></button>`).join("")}</div>
+      <p class="note">Prefer to describe it? <button class="btn link" id="askMig">Ask Claude to map it for you</button></p></div>
+
+    <div class="card"><h2>3 · Prove it matches the old system</h2>
+      <p class="muted" style="margin-top:0">Paste a legacy report query. The sandbox runs it and the new pipeline on the same data and compares every row. It only reads; nothing else is run.</p>
+      <label class="f" for="legSql">Legacy SQL</label>
+      <textarea id="legSql" style="min-height:140px;font-family:ui-monospace,monospace;font-size:.82rem">${esc(MIG.legacy.sql)}</textarea>
+      <div class="row" style="margin-top:8px"><select id="legPl" aria-label="Pipeline to compare">${plOpts.length ? opts(plOpts, plOpts[0].value) : `<option value="">No pipelines yet</option>`}</select>
+        <button class="btn ghost" id="legMake">Create the matching pipeline for this example</button>
+        <button class="btn gold" id="legBtn">Compare</button></div>
+      <div id="legOut"></div></div>
+
+    <div class="card"><h2>4 · Move platforms and reconcile</h2>
+      <div class="row"><span>Move every pipeline to</span><select id="rpPlat" aria-label="Target platform">${opts(["databricks","snowflake","fabric"].map(p => ({value:p, label:PLAT[p]})), "fabric")}</select><button class="btn" id="rpBtn">Show the plan</button></div>
+      <div id="rpOut"></div>
+      <h3>Reconcile an old table against a new one</h3>
+      <div class="row"><select id="recL" aria-label="Old table">${opts(dsOpts, "products")}</select><span class="muted">vs</span><select id="recR" aria-label="New table">${opts(dsOpts, "products_current")}</select>
+        <input type="text" id="recK" value="product_id" placeholder="key column" style="width:150px" aria-label="Key column">
+        <input type="text" id="recM" value="unit_price" placeholder="totals to compare, comma-separated" style="width:220px" aria-label="Measures">
+        <button class="btn" id="recBtn">Reconcile</button></div>
+      <div id="recOut"></div></div>`;
+  const root = $("#migrate");
+  $$("[data-ods]", root).forEach(b => b.onclick = () => openDataset(b.dataset.ods));
+  $$("[data-cex]", root).forEach(b => b.onclick = () => openBuilder(structuredClone(MIG.conform.find(x => x.id === b.dataset.cex).spec)));
+  $("#askMig").onclick = async () => { show("ask"); for(let i = 0; i < 40 && !$("#q"); i++) await new Promise(r => setTimeout(r, 50)); $("#q").value = MIG.conform[0].ask; $("#q").focus(); };
+  $("#impBtn").onclick = async () => { try{ const r = await api("/api/catalog/import", {json:{platform:$("#impPlat").value, owner:$("#impOwner").value, schema_csv:$("#impCsv").value, by:myName()}});
+      await loadCatalog();
+      $("#impOut").innerHTML = `<div class="eq MATCH">${r.created.length ? `Imported ${r.created.map(c => `<b>${esc(c.id)}</b> (${c.columns} columns${c.pii_columns.length ? `, PII: ${esc(c.pii_columns.join(", "))}` : ""})`).join(", ")}.` : "Nothing new imported."}
+        ${r.skipped.length ? `<div class="muted">Skipped: ${r.skipped.map(x => `${esc(x.id)} (${esc(x.reason)})`).join(", ")}</div>` : ""}<div class="muted">${esc(r.note)}</div></div>`; }
+    catch(e){ $("#impOut").innerHTML = `<div class="eq COULD_NOT_RUN">${esc(e.message)}</div>`; } };
+  $("#legMake").onclick = async () => { try{ const p = await api("/api/pipelines", {json:{spec:MIG.legacy.spec, by:myName()}}); await api(`/api/pipelines/${p.id}/test`, {json:{by:myName()}});
+      loaded.migrate = false; await loaders.migrate(); $("#legPl").value = p.id; toast(`Created pipeline #${p.id}`); }catch(e){ toast(e.message); } };
+  $("#legBtn").onclick = async () => { const id = $("#legPl").value; if(!id) return toast("Create or pick a pipeline first.");
+    $("#legOut").innerHTML = `<p><span class="spinner"></span> Running both on the same data…</p>`;
+    try{ const r = await api(`/api/pipelines/${id}/compare-legacy`, {json:{sql:$("#legSql").value, by:myName()}});
+      $("#legOut").innerHTML = eqCard(r) + `<p class="note">Saved with pipeline #${esc(id)}; approvers see this result. <button class="btn link" data-open="${esc(id)}">Open pipeline</button></p>`;
+      $$("#legOut [data-open]").forEach(b => b.onclick = () => openPipeline(+b.dataset.open)); }
+    catch(e){ $("#legOut").innerHTML = `<div class="eq COULD_NOT_RUN">${esc(e.message)}</div>`; } };
+  $("#rpBtn").onclick = async () => { const r = await api("/api/migration/replatform?platform=" + $("#rpPlat").value);
+    $("#rpOut").innerHTML = `<p class="muted">${esc(r.note)}</p>` + table([
+      ["Pipeline", x => `<b>${esc(x.name)}</b> ${x.kind === "conform" ? `<span class="pill">migration</span>` : ""}<div class="muted">now on ${esc(x.from)}</div>`],
+      ["New table", x => x.already_there ? `<span class="muted">already on ${esc(r.platform)}</span>` : `<code>${esc(x.new_target)}</code>`],
+      ["Still reads from another platform", x => x.reads_from_other_platforms.length ? esc(x.reads_from_other_platforms.join(", ")) : `<span class="muted">nothing</span>`],
+      ["Code generated", x => esc(x.code.join(", "))],
+      ["", x => x.already_there ? "" : `<button class="btn small ghost" data-rp="${x.pipeline_id}">Open as draft</button>`]], r.pipelines);
+    $$("#rpOut [data-rp]").forEach(b => b.onclick = async () => { try{ const p = await api(`/api/pipelines/${b.dataset.rp}/replatform`, {json:{platform:$("#rpPlat").value, by:myName()}}); toast(`Draft #${p.id} created on ${r.platform}`); openPipeline(p.id); }catch(e){ toast(e.message); } }); };
+  $("#recBtn").onclick = async () => { try{ const r = await api("/api/reconcile", {json:{left:$("#recL").value, right:$("#recR").value, key:$("#recK").value.trim(),
+      measures:$("#recM").value.split(",").map(x => x.trim()).filter(Boolean), by:myName()}}); $("#recOut").innerHTML = recCard(r); }
+    catch(e){ $("#recOut").innerHTML = `<div class="eq COULD_NOT_RUN">${esc(e.message)}</div>`; } };
+};
+
 /* ---------------- Approvals ---------------- */
 async function refreshPending(){
   try{ const [a, r] = await Promise.all([api("/api/actions?status=PENDING"), api("/api/reviews?status=PENDING_REVIEW")]);
@@ -769,6 +1003,8 @@ async function drawApprovals(){
         <div class="row" style="justify-content:space-between"><b>${esc(pl.pipeline)}</b><span class="pill platpill">${esc(pl.platform)}</span></div>
         <p style="margin:6px 0">${esc(pl.summary)}</p>
         <div class="muted">Target <code>${esc(pl.target)}</code> · requested by ${esc(a.requested_by)} · sandbox: ${esc({PASSED:"all checks passed",PASSED_WITH_WARNINGS:`passed with ${pl.validation.warn} warning(s)`}[pl.validation.status] || pl.validation.status)}</div>
+        ${pl.kind === "conform" ? `<div class="muted">Migration pipeline · reconciliation checks ran in the sandbox</div>` : ""}
+        ${pl.legacy_comparison ? `<div class="eq ${esc(pl.legacy_comparison.status)}" style="padding:8px 12px">Legacy comparison: <b>${esc(pl.legacy_comparison.headline)}</b></div>` : ""}
         ${pl.warnings.length ? `<ul style="margin:8px 0">${pl.warnings.map(w => `<li>⚠ ${esc(w)}</li>`).join("")}</ul>` : ""}
         <details class="how"><summary>Files that will be committed (${pl.files.length})</summary><pre>${esc(pl.files.join("\n"))}</pre></details>
         <div class="row" style="margin-top:10px">
